@@ -1,0 +1,43 @@
+{
+  "name": "local-cert",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "tsx --conditions=react-server scripts/migrate.ts",
+    "admin:reset": "tsx --conditions=react-server scripts/reset-admin.ts",
+    "aws:check": "tsx --conditions=react-server scripts/check-aws.ts",
+    "openapi:check": "tsx --conditions=react-server scripts/check-openapi.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-route-53": "^3.1116.0",
+    "@aws-sdk/client-sts": "^3.1116.0",
+    "@node-rs/argon2": "^2.1.0",
+    "acme-client": "^5.4.0",
+    "better-sqlite3": "^13.0.3",
+    "jose": "^6.2.10",
+    "kysely": "^0.29.5",
+    "next": "^16.3.2",
+    "pg": "^8.23.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^26.2.0",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,45 @@
+services:
+  app:
+    build: .
+    ports: ['3000:3000']
+    environment:
+      DB_DIALECT: postgres
+      DATABASE_URL: postgres://localcert:localcert@db:5432/localcert
+      MASTER_KEY: ${MASTER_KEY:?generate with: openssl rand -base64 32}
+      JWT_SECRET: ${JWT_SECRET:?generate with: openssl rand -base64 48}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      APP_ENV: ${APP_ENV:-production}
+      ACME_ENV: ${ACME_ENV:-}
+      ACME_EMAIL: ${ACME_EMAIL:?required}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      TAG_RECORDS: ${TAG_RECORDS:-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # Optional: provision the admin account without the /setup wizard.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+    volumes:
+      - certdata:/app/data
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: localcert
+      POSTGRES_PASSWORD: localcert
+      POSTGRES_DB: localcert
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U localcert']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  certdata:
+  pgdata:
