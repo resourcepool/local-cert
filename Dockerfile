@@ -1,26 +1,35 @@
 # syntax=docker/dockerfile:1
 
 # ---------------------------------------------------------------- dependencies
-# No build toolchain: better-sqlite3 bundles linuxmusl-{x64,arm64} prebuilds in
-# its tarball and declares no install script, and @node-rs/argon2 publishes
-# musl napi binaries. Adding python3/make/g++ here would cost minutes and be
-# used by nothing.
 FROM node:26-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+
+# --ignore-scripts, then rebuild the one package that genuinely needs its own.
+#
+# better-sqlite3 has a root binding.gyp and no install script, which makes npm
+# run `node-gyp rebuild` implicitly — it would need a full python3/make/g++
+# toolchain to produce a build/Release binary the loader never even looks at:
+# lib/binding.js resolves prebuilds/<platform>.node, and the tarball ships
+# linuxmusl-x64 and linuxmusl-arm64. So the compile is pure waste, and skipping
+# it removes the toolchain entirely.
+#
+# esbuild (via tsx, used by the operational CLIs) is the only dependency with a
+# real postinstall, so it is rebuilt explicitly. sharp's binding.gyp lives under
+# src/, not at the package root, so npm never triggers it.
+RUN npm ci --ignore-scripts \
+ && npm rebuild esbuild \
+ && node -e "require('better-sqlite3'); require('@node-rs/argon2')" \
+ && node -e "require('esbuild')"
 
 # ----------------------------------------------------------------------- build
 FROM node:26-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Placeholders so the build can evaluate modules that read these at import time.
-# They never reach the runtime image; real values are injected as env vars.
-ENV MASTER_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
-    JWT_SECRET=build-time-placeholder-not-used-at-runtime-ok \
-    ACME_EMAIL=build@invalid \
-    DISABLE_WORKER=1
+# No secret placeholders are needed: every route is force-dynamic, so nothing
+# that reads MASTER_KEY / JWT_SECRET / ACME_EMAIL is evaluated at build time.
+ENV DISABLE_WORKER=1
 RUN npm run build
 
 # --------------------------------------------------------------------- runtime
