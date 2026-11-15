@@ -55,6 +55,7 @@ export const TAGS = [
   { name: 'DNS', description: 'Direct record management' },
   { name: 'Admin', description: 'Console-only: domains, keys, stats' },
   { name: 'Ops', description: 'Health, ACME account, this document' },
+  { name: 'MCP', description: 'Model Context Protocol endpoint for AI agents' },
 ] as const;
 
 export const ROUTES: RouteDef[] = [
@@ -427,5 +428,24 @@ export const ROUTES: RouteDef[] = [
     summary: 'Console dashboard counters',
     security: 'session',
     responses: { 200: { description: 'OK', schema: S.statsSchema } },
+  },
+
+  {
+    method: 'post',
+    path: '/api/mcp',
+    tag: 'MCP',
+    summary: 'Model Context Protocol (Streamable HTTP, JSON-RPC 2.0)',
+    description:
+      'Exposes the features of this API as MCP tools, with the same API key and the same ' +
+      'scopes. Not meant to be called by hand: point an MCP client at this URL with an ' +
+      'Authorization header. Admin tools are listed for admin keys only. The list_skills and ' +
+      'get_skill tools return manuals describing every tool.',
+    body: { schema: S.okSchema, required: true, description: 'A JSON-RPC 2.0 message' },
+    responses: {
+      200: { description: 'JSON-RPC response', schema: S.okSchema },
+      202: { description: 'Notification accepted; no body' },
+      400: { description: 'Body is not valid JSON-RPC', schema: S.okSchema },
+      401: problem('Missing, invalid, revoked or expired key'),
+    },
   },
 ];

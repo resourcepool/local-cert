@@ -229,6 +229,7 @@ DELETE /api/v1/dns/records           ?fqdn= &type= &values= &ttl=
 GET    /api/v1/acme/account
 GET    /api/openapi.json             description OpenAPI 3.1 (authentifiée)
 GET    /api/healthz
+POST   /api/mcp                      serveur MCP pour agents IA (voir plus bas)
 ```
 
 ### Administration (session console)
@@ -391,8 +392,98 @@ Le typage ferme la boucle : `serializeCert` retourne
 mettre à jour le schéma publié échoue à la compilation.
 
 ```
-openapi:check ok — 29 operations over 18 paths, 36 component schemas, all $refs resolve.
+openapi:check ok — 30 operations over 19 paths, 36 component schemas, all $refs resolve.
 ```
+
+---
+
+## Serveur MCP
+
+Les fonctionnalités de local-cert sont exposées aux agents IA par un serveur
+[MCP](https://modelcontextprotocol.io) sur **`POST /api/mcp`** (transport
+Streamable HTTP, sans état).
+
+### Authentification
+
+La même que l'API : `Authorization: Bearer <clé d'API ou JWT>`, avec les mêmes
+scopes. Le cookie de session de la console n'y est **pas** accepté.
+
+```bash
+# Claude Code
+claude mcp add --transport http local-cert http://localhost:3000/api/mcp \
+  --header "Authorization: Bearer lc_..."
+```
+
+```jsonc
+// .mcp.json, ou tout client MCP acceptant un serveur HTTP
+{
+  "mcpServers": {
+    "local-cert": {
+      "type": "http",
+      "url": "http://localhost:3000/api/mcp",
+      "headers": { "Authorization": "Bearer ${LOCAL_CERT_API_KEY}" }
+    }
+  }
+}
+```
+
+### Outils
+
+| Outil | Équivalent REST | Scope requis |
+|---|---|---|
+| `whoami` | — | clé valide |
+| `list_certificates` | `GET /api/v1/certificates` | grant sur le domaine |
+| `request_certificate` | `POST /api/v1/certificates` | `cert:issue` (+ `dns:write` si enregistrement A) |
+| `get_certificate` | `GET /api/v1/certificates/{id}` | `cert:read` |
+| `get_certificate_events` | `GET …/{id}/events` | `cert:read` |
+| `get_certificate_bundle` | `GET …/{id}/bundle` | `cert:read` (+ `cert:export` pour la clé) |
+| `renew_certificate` | `POST …/{id}/renew` | `cert:renew` |
+| `update_certificate_metadata` | `PATCH /api/v1/certificates/{id}` | `cert:issue` |
+| `revoke_certificate` | `DELETE /api/v1/certificates/{id}` | `cert:revoke` |
+| `check_subdomain` | `GET /api/v1/subdomains/{fqdn}` | `cert:read` |
+| `list_dns_records` | `GET /api/v1/dns/records` | `dns:read` |
+| `upsert_dns_record` | `PUT /api/v1/dns/records` | `dns:write` |
+| `delete_dns_record` | `DELETE /api/v1/dns/records` | `dns:write` |
+| `get_acme_account` | `GET /api/v1/acme/account` | clé valide |
+| `admin_get_stats` | `GET /api/admin/stats` | clé admin |
+| `admin_list_domains` / `admin_create_domain` / `admin_delete_domain` | `/api/admin/domains` | clé admin |
+| `admin_list_api_keys` / `admin_create_api_key` / `admin_update_api_key` / `admin_delete_api_key` | `/api/admin/keys` | clé admin |
+
+Les outils non-admin **appellent le handler REST correspondant** dans le même
+processus, avec l'en-tête `Authorization` de l'appelant : authentification,
+scopes, validation et journal d'audit sont ceux de l'API, par construction. Une
+clé ne peut rien faire de plus par MCP que par `curl`.
+
+Les outils `admin_*` ne sont **listés et utilisables que pour une clé admin**.
+C'est la seule différence avec REST, où `/api/admin/*` n'accepte que la session
+console : ici une clé admin peut gérer domaines et clés. Avant chaque appel
+admin, la clé est relue en base — un JWT issu d'une clé admin révoquée ou
+rétrogradée est donc refusé immédiatement, sans attendre son expiration.
+
+`get_certificate_bundle` ne renvoie par défaut que la chaîne publique ; la clé
+privée n'est incluse que sur demande explicite (`include: ["key"]`), car elle
+atterrit alors dans le contexte du modèle.
+
+Non exposés : `/api/setup`, `/api/admin/session`, `/api/v1/auth/token`,
+`/api/healthz`, `/api/openapi.json` (amorçage et transport, sans objet pour un
+agent) et le flux SSE des événements.
+
+### Skills
+
+Le serveur embarque ses propres modes d'emploi, au format `SKILL.md` :
+
+| Skill | Couvre | Visible par |
+|---|---|---|
+| `local-cert-getting-started` | permissions, erreurs, `whoami`, skills | tous |
+| `local-cert-certificates` | cycle de vie d'un certificat | tous |
+| `local-cert-dns` | disponibilité d'un sous-domaine, enregistrements | tous |
+| `local-cert-admin` | domaines, clés d'API, statistiques | clés admin |
+
+Deux accès équivalents : les outils **`list_skills`** / **`get_skill`**, et les
+ressources MCP `skill://local-cert/<nom>`. Le texte explique les enchaînements
+et les pièges ; la référence de chaque outil (rôle, scope, arguments) est
+**générée depuis le catalogue d'outils** (`src/lib/mcp/tools.ts`), elle ne peut
+donc pas diverger de ce que le serveur expose réellement.
 
 ---
 
