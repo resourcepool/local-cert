@@ -26,6 +26,9 @@ export const POST = handler(async (req: Request, ctx: { params: Promise<{ id: st
     .executeTakeFirstOrThrow();
   requireScope(principal, domain.id, SCOPES.CERT_RENEW);
 
+  if (cert.source === 'acme') {
+    throw new ApiError('conflict', 'Issued through the ACME server: the private key lives on the client, which renews by itself');
+  }
   if (cert.locked_at) throw new ApiError('conflict', 'An issuance is already running for this certificate');
   if (cert.status === 'revoked') throw new ApiError('conflict', 'Certificate is revoked; create a new one');
 

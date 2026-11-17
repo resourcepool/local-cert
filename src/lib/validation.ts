@@ -116,6 +116,14 @@ export const createDomainSchema = z.object({
 
 const scopeEnum = z.enum(DOMAIN_SCOPES as [string, ...string[]]);
 
+export const createEabSchema = z.object({
+  api_key_id: z
+    .string()
+    .min(1)
+    .optional()
+    .meta({ description: 'Key to bind. Defaults to the calling key; another key needs admin.' }),
+});
+
 export const createApiKeySchema = z.object({
   name: z.string().trim().min(1).max(80),
   is_admin: z.boolean().default(false),

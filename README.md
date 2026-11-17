@@ -487,6 +487,78 @@ donc pas diverger de ce que le serveur expose réellement.
 
 ---
 
+## Serveur ACME
+
+local-cert parle aussi ACME (RFC 8555) sur **`/acme/directory`** : Traefik,
+certbot, Caddy, acme.sh ou lego peuvent s'en servir comme d'une CA, avec un
+challenge HTTP-01 tout ce qu'il y a de plus classique.
+
+Ce n'est pas une CA pour autant. Le challenge HTTP-01 n'est **jamais vérifié**
+(personne ne va chercher `/.well-known/acme-challenge/...`, ces hôtes sont sur
+le LAN) : y répondre déclenche ce que local-cert fait d'habitude — écriture du
+TXT `_acme-challenge` dans la zone Route53, validation DNS-01 auprès de Let's
+Encrypt, nettoyage — et le challenge passe à `valid` quand c'est terminé. Le
+certificat est ensuite émis par Let's Encrypt à partir du CSR du client.
+
+Ce qui décide du droit d'émettre, c'est la clé d'API :
+
+- un nom hors des domaines gérés est refusé (`rejectedIdentifier`) ;
+- la clé doit porter `cert:issue` sur le domaine concerné (`unauthorized`) ;
+- tous les noms d'un ordre doivent appartenir à la même zone gérée.
+
+### Rattacher un client à une clé d'API
+
+Le lien se fait par External Account Binding, une fois, à l'enregistrement du
+client. La clé d'API ne circule jamais dans les requêtes ACME.
+
+```bash
+curl -X POST https://certs.example.com/api/v1/acme/eab \
+  -H "Authorization: Bearer lc_..."
+# { "id": "eab_…", "hmac_key": "…", "directory_url": "https://certs.example.com/acme/directory", … }
+```
+
+`hmac_key` n'est affichée qu'une fois. Un admin peut lier une autre clé avec
+`{"api_key_id": "key_…"}`. `GET /api/v1/acme/eab` liste les identifiants,
+`DELETE /api/v1/acme/eab/{id}` en révoque un et désactive les comptes ACME
+enregistrés avec. Révoquer ou laisser expirer la clé d'API coupe aussi l'accès :
+ses droits sont relus à chaque requête.
+
+```yaml
+# Traefik
+certificatesResolvers:
+  localcert:
+    acme:
+      caServer: https://certs.example.com/acme/directory
+      email: ops@example.com
+      storage: /letsencrypt/localcert.json
+      eab:
+        kid: eab_…
+        hmacEncoded: <hmac_key>
+      httpChallenge:
+        entryPoint: web
+```
+
+```bash
+# certbot
+certbot certonly --standalone -d nas.home.example.com \
+  --server https://certs.example.com/acme/directory \
+  --eab-kid eab_… --eab-hmac-key <hmac_key>
+```
+
+### À savoir
+
+- Le client signe l'URL exacte qu'il appelle. Derrière un reverse proxy, soit
+  celui-ci transmet `X-Forwarded-Proto` / `X-Forwarded-Host`, soit vous fixez
+  `PUBLIC_URL`. Une erreur `JWS "url" is … but this endpoint is …` vient de là.
+- La validation DNS prend une à trois minutes ; le client attend sur son
+  challenge pendant ce temps.
+- Ces certificats apparaissent dans la console (`key_type: external`) sans clé
+  privée ni renouvellement automatique : la clé reste chez le client, qui
+  renouvelle lui-même. `POST …/renew` les refuse.
+- Révocation ACME (`revoke-cert`) : la clé liée doit porter `cert:revoke`.
+- Non implémenté : `keyChange` (rotation de clé de compte) et la révocation
+  signée par la clé du certificat.
+
 ## Suppression et récupération
 
 Le cas qui compte : **la zone Route53 n'est plus accessible** (rôle révoqué,

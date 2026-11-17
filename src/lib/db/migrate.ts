@@ -164,6 +164,91 @@ const STEPS: Step[] = [
         .execute();
     },
   },
+  {
+    id: '003_acme_server',
+    up: async (k) => {
+      // 'api' rows are driven by the worker; 'acme' rows by the ACME server,
+      // which waits for a CSR the client only sends at finalization.
+      await k.schema
+        .alterTable('certificates')
+        .addColumn('source', TEXT, (c) => c.notNull().defaultTo('api'))
+        .execute();
+
+      await k.schema
+        .createTable('acme_eab_keys')
+        .addColumn('id', TEXT, (c) => c.primaryKey())
+        .addColumn('api_key_id', TEXT, (c) =>
+          c.notNull().references('api_keys.id').onDelete('cascade'),
+        )
+        .addColumn('hmac_enc', TEXT, (c) => c.notNull())
+        .addColumn('created_by', TEXT, (c) => c.notNull())
+        .addColumn('created_at', TEXT, (c) => c.notNull())
+        .addColumn('last_used_at', TEXT)
+        .addColumn('revoked_at', TEXT)
+        .execute();
+
+      await k.schema
+        .createTable('acme_accounts')
+        .addColumn('id', TEXT, (c) => c.primaryKey())
+        .addColumn('api_key_id', TEXT, (c) =>
+          c.notNull().references('api_keys.id').onDelete('cascade'),
+        )
+        .addColumn('eab_id', TEXT, (c) => c.notNull())
+        .addColumn('jwk', TEXT, (c) => c.notNull())
+        .addColumn('thumbprint', TEXT, (c) => c.notNull().unique())
+        .addColumn('contact', TEXT, (c) => c.notNull().defaultTo('[]'))
+        .addColumn('status', TEXT, (c) => c.notNull())
+        .addColumn('created_at', TEXT, (c) => c.notNull())
+        .execute();
+
+      await k.schema
+        .createTable('acme_orders')
+        .addColumn('id', TEXT, (c) => c.primaryKey())
+        .addColumn('account_id', TEXT, (c) =>
+          c.notNull().references('acme_accounts.id').onDelete('cascade'),
+        )
+        .addColumn('certificate_id', TEXT, (c) =>
+          c.notNull().references('certificates.id').onDelete('cascade'),
+        )
+        .addColumn('identifiers', TEXT, (c) => c.notNull())
+        .addColumn('status', TEXT, (c) => c.notNull())
+        .addColumn('upstream_status', TEXT, (c) => c.notNull())
+        .addColumn('upstream_order_url', TEXT)
+        .addColumn('error', TEXT)
+        .addColumn('expires_at', TEXT, (c) => c.notNull())
+        .addColumn('created_at', TEXT, (c) => c.notNull())
+        .execute();
+      await k.schema
+        .createIndex('idx_acme_orders_account')
+        .on('acme_orders')
+        .column('account_id')
+        .execute();
+
+      await k.schema
+        .createTable('acme_authorizations')
+        .addColumn('id', TEXT, (c) => c.primaryKey())
+        .addColumn('order_id', TEXT, (c) =>
+          c.notNull().references('acme_orders.id').onDelete('cascade'),
+        )
+        .addColumn('identifier', TEXT, (c) => c.notNull())
+        .addColumn('wildcard', INT, (c) => c.notNull().defaultTo(0))
+        .addColumn('token', TEXT, (c) => c.notNull())
+        .addColumn('responded_type', TEXT)
+        .addColumn('created_at', TEXT, (c) => c.notNull())
+        .execute();
+      await k.schema
+        .createIndex('idx_acme_authz_order')
+        .on('acme_authorizations')
+        .column('order_id')
+        .execute();
+
+      await k.schema
+        .createTable('acme_nonces')
+        .addColumn('nonce', TEXT, (c) => c.primaryKey())
+        .addColumn('expires_at', TEXT, (c) => c.notNull())
+        .execute();
+    },
+  },
 ];
 
 let migrated = false;

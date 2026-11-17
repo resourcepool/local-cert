@@ -17,6 +17,73 @@ export interface Database {
   certificates: CertificatesTable;
   certificate_events: CertificateEventsTable;
   audit_log: AuditLogTable;
+  acme_eab_keys: AcmeEabKeysTable;
+  acme_accounts: AcmeAccountsTable;
+  acme_orders: AcmeOrdersTable;
+  acme_authorizations: AcmeAuthorizationsTable;
+  acme_nonces: AcmeNoncesTable;
+}
+
+/** External Account Binding credential: lets an ACME client act as an API key. */
+export interface AcmeEabKeysTable {
+  /** the EAB `kid` */
+  id: string;
+  api_key_id: string;
+  /** AES-256-GCM envelope of the base64url HMAC key */
+  hmac_enc: string;
+  created_by: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface AcmeAccountsTable {
+  id: string;
+  /** the API key whose grants decide what this account may order */
+  api_key_id: string;
+  eab_id: string;
+  /** JSON public JWK of the account key */
+  jwk: string;
+  /** RFC 7638 thumbprint, unique: one account per key */
+  thumbprint: string;
+  /** JSON array of contact URIs */
+  contact: string;
+  status: 'valid' | 'deactivated';
+  created_at: string;
+}
+
+export interface AcmeOrdersTable {
+  id: string;
+  account_id: string;
+  certificate_id: string;
+  /** JSON array of DNS names as requested (wildcards keep their "*.") */
+  identifiers: string;
+  /** 'pending' also covers RFC 8555 "ready", which is derived from the authorizations */
+  status: 'pending' | 'processing' | 'valid' | 'invalid';
+  /** DNS-01 validation against the upstream CA; starts when the client answers a challenge */
+  upstream_status: 'idle' | 'running' | 'ready' | 'failed';
+  upstream_order_url: string | null;
+  /** JSON problem document */
+  error: string | null;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface AcmeAuthorizationsTable {
+  id: string;
+  order_id: string;
+  /** DNS name without the wildcard label */
+  identifier: string;
+  wildcard: number;
+  token: string;
+  /** challenge type the client answered, null until it does */
+  responded_type: string | null;
+  created_at: string;
+}
+
+export interface AcmeNoncesTable {
+  nonce: string;
+  expires_at: string;
 }
 
 export interface SettingsTable {
@@ -111,6 +178,8 @@ export interface CertificatesTable {
   webhook_url: string | null;
   /** JSON object of caller-supplied string key/values, for business context */
   metadata: string;
+  /** 'api' = key generated here, worker-driven; 'acme' = CSR from an ACME client */
+  source: 'api' | 'acme';
   last_error: string | null;
   /** set while a worker holds the order, for crash recovery */
   locked_at: string | null;

@@ -118,33 +118,7 @@ export async function runIssuance(certId: string): Promise<void> {
       },
     });
 
-    const x509 = new X509Certificate(chain);
-    const leafEnd = chain.indexOf('-----END CERTIFICATE-----') + '-----END CERTIFICATE-----'.length;
-    const leafPem = chain.slice(0, leafEnd) + '\n';
-    const chainPem = chain.slice(leafEnd).trim() + '\n';
-
-    await db()
-      .updateTable('certificates')
-      .set({
-        status: 'issued',
-        private_key_enc: encryptSecret(privateKey.toString()),
-        cert_pem: leafPem,
-        chain_pem: chainPem,
-        serial: x509.serialNumber,
-        issuer: x509.issuer.split('\n').find((l) => l.startsWith('CN='))?.slice(3) ?? x509.issuer,
-        not_before: new Date(x509.validFrom).toISOString(),
-        not_after: new Date(x509.validTo).toISOString(),
-        fingerprint_sha256: x509.fingerprint256,
-        last_error: null,
-        attempt: 0,
-        next_attempt_at: null,
-        updated_at: nowIso(),
-      })
-      .where('id', '=', certId)
-      .execute();
-
-    await logEvent(certId, 'issued', `Valid until ${new Date(x509.validTo).toISOString()}`);
-    await notify(certId, 'certificate.issued');
+    await storeIssued(certId, chain, privateKey.toString());
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const attempt = cert.attempt + 1;
@@ -180,6 +154,154 @@ export async function runIssuance(certId: string): Promise<void> {
       .set({ locked_at: null })
       .where('id', '=', certId)
       .execute();
+  }
+}
+
+/** Records a freshly issued chain. `privateKey` is null when the client kept its own key. */
+async function storeIssued(certId: string, chain: string, privateKey: string | null): Promise<void> {
+  const x509 = new X509Certificate(chain);
+  const leafEnd = chain.indexOf('-----END CERTIFICATE-----') + '-----END CERTIFICATE-----'.length;
+  const leafPem = chain.slice(0, leafEnd) + '\n';
+  const chainPem = chain.slice(leafEnd).trim() + '\n';
+
+  await db()
+    .updateTable('certificates')
+    .set({
+      status: 'issued',
+      private_key_enc: privateKey === null ? null : encryptSecret(privateKey),
+      cert_pem: leafPem,
+      chain_pem: chainPem,
+      serial: x509.serialNumber,
+      issuer: x509.issuer.split('\n').find((l) => l.startsWith('CN='))?.slice(3) ?? x509.issuer,
+      not_before: new Date(x509.validFrom).toISOString(),
+      not_after: new Date(x509.validTo).toISOString(),
+      fingerprint_sha256: x509.fingerprint256,
+      last_error: null,
+      attempt: 0,
+      next_attempt_at: null,
+      updated_at: nowIso(),
+    })
+    .where('id', '=', certId)
+    .execute();
+
+  await logEvent(certId, 'issued', `Valid until ${new Date(x509.validTo).toISOString()}`);
+  await notify(certId, 'certificate.issued');
+}
+
+async function failExternal(certId: string, err: unknown): Promise<string> {
+  const message = err instanceof Error ? err.message : String(err);
+  // No retry: the ACME client owns the retry loop and will open a new order.
+  await db()
+    .updateTable('certificates')
+    .set({
+      status: 'failed',
+      last_error: message,
+      next_attempt_at: null,
+      locked_at: null,
+      updated_at: nowIso(),
+    })
+    .where('id', '=', certId)
+    .execute();
+  await logEvent(certId, 'failed', message, 'error');
+  await notify(certId, 'certificate.failed');
+  return message;
+}
+
+/**
+ * First half of an issuance whose key lives on the client (ACME server
+ * orders): opens the order at the upstream CA and proves control of every
+ * name over DNS-01, but stops before finalization because the CSR is not
+ * known yet. Returns the upstream order URL to finalize later.
+ */
+export async function validateExternalOrder(certId: string): Promise<string> {
+  const cert = await db()
+    .selectFrom('certificates')
+    .selectAll()
+    .where('id', '=', certId)
+    .executeTakeFirstOrThrow();
+  const domain = await db()
+    .selectFrom('domains')
+    .selectAll()
+    .where('id', '=', cert.domain_id)
+    .executeTakeFirstOrThrow();
+  const zone: ZoneConfig = {
+    zoneId: domain.route53_zone_id,
+    region: domain.aws_region,
+    roleArn: domain.aws_role_arn,
+  };
+  const names: string[] = JSON.parse(cert.domains);
+
+  try {
+    await logEvent(certId, 'order.create', `Requesting ${names.join(', ')} (ACME client order)`);
+    const client = await acmeClient();
+    const order = await client.createOrder({
+      identifiers: names.map((value) => ({ type: 'dns', value })),
+    });
+    const authzs = await client.getAuthorizations(order);
+
+    // "example.com" and "*.example.com" share one TXT name: those must go one
+    // after the other, since each UPSERT replaces the record's value.
+    const byRecord = new Map<string, typeof authzs>();
+    for (const authz of authzs) {
+      if (authz.status === 'valid') continue;
+      const recordName = `_acme-challenge.${authz.identifier.value}`;
+      byRecord.set(recordName, [...(byRecord.get(recordName) ?? []), authz]);
+    }
+
+    if (byRecord.size > 0) await setStatus(certId, 'dns_propagating');
+
+    await Promise.all(
+      [...byRecord].map(async ([recordName, group]) => {
+        for (const authz of group) {
+          const challenge = authz.challenges.find((c) => c.type === 'dns-01');
+          if (!challenge) throw new Error(`upstream CA offers no dns-01 for ${authz.identifier.value}`);
+          const value = await client.getChallengeKeyAuthorization(challenge);
+
+          await logEvent(certId, 'dns.upsert', `UPSERT TXT ${recordName}`);
+          const changeId = await upsertRecord(zone, recordName, 'TXT', [value], 60);
+          try {
+            await waitForSync(zone, changeId);
+            await waitForTxtPropagation(zone, recordName, value, 180_000, (m) =>
+              void logEvent(certId, 'dns.propagation', m),
+            );
+            await logEvent(certId, 'dns.propagated', `TXT ${recordName} visible on all authoritative NS`);
+            await client.completeChallenge(challenge);
+            await client.waitForValidStatus(challenge);
+          } finally {
+            await deleteRecord(zone, recordName, 'TXT', [value], 60).catch(() => {});
+            await logEvent(certId, 'dns.cleanup', `DELETE TXT ${recordName}`);
+          }
+        }
+      }),
+    );
+
+    await db()
+      .updateTable('certificates')
+      .set({ status: 'validating', locked_at: null, updated_at: nowIso() })
+      .where('id', '=', certId)
+      .execute();
+    await logEvent(certId, 'acme.ready', 'Names validated upstream, waiting for the client CSR');
+    return order.url;
+  } catch (err) {
+    throw new Error(await failExternal(certId, err));
+  }
+}
+
+/** Second half: finalizes the upstream order with the CSR the ACME client sent. */
+export async function finalizeExternalOrder(
+  certId: string,
+  upstreamOrderUrl: string,
+  csrPem: string,
+): Promise<void> {
+  try {
+    await logEvent(certId, 'order.finalize', 'Finalizing with the client CSR');
+    const client = await acmeClient();
+    const order = await client.getOrder({ url: upstreamOrderUrl } as acme.Order);
+    const finalized = await client.finalizeOrder(order, csrPem);
+    const chain = await client.getCertificate(finalized);
+    await storeIssued(certId, chain, null);
+  } catch (err) {
+    throw new Error(await failExternal(certId, err));
   }
 }
 

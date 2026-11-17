@@ -90,6 +90,8 @@ export interface CreateCertInput {
   metadata: Record<string, string>;
   createdBy: string;
   idempotencyKey: string | null;
+  /** 'acme' rows are driven by the ACME server; the worker leaves them alone */
+  source?: 'api' | 'acme';
 }
 
 export async function createCertificate(input: CreateCertInput): Promise<CertRow> {
@@ -113,6 +115,7 @@ export async function createCertificate(input: CreateCertInput): Promise<CertRow
     renew_before_days: input.renewBeforeDays,
     dns_record: input.dnsRecord ? JSON.stringify(input.dnsRecord) : null,
     metadata: JSON.stringify(input.metadata ?? {}),
+    source: input.source ?? 'api',
     webhook_url: input.webhookUrl,
     last_error: null,
     locked_at: null,

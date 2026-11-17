@@ -54,6 +54,7 @@ export const TAGS = [
   { name: 'Subdomains', description: 'Availability lookup' },
   { name: 'DNS', description: 'Direct record management' },
   { name: 'Admin', description: 'Console-only: domains, keys, stats' },
+  { name: 'ACME server', description: 'Credentials for ACME clients using /acme/directory' },
   { name: 'Ops', description: 'Health, ACME account, this document' },
   { name: 'MCP', description: 'Model Context Protocol endpoint for AI agents' },
 ] as const;
@@ -301,6 +302,40 @@ export const ROUTES: RouteDef[] = [
     summary: 'ACME environment and account',
     description: 'Defaults to the production directory when APP_ENV=production, staging otherwise.',
     responses: { 200: { description: 'OK', schema: S.acmeAccountSchema } },
+  },
+  {
+    method: 'get',
+    path: '/api/v1/acme/eab',
+    tag: 'ACME server',
+    summary: 'List EAB credentials',
+    description: 'A key sees its own credentials, an admin sees all of them.',
+    responses: { 200: { description: 'OK', schema: S.acmeEabListSchema } },
+  },
+  {
+    method: 'post',
+    path: '/api/v1/acme/eab',
+    tag: 'ACME server',
+    summary: 'Create an EAB credential',
+    description:
+      'Returns the `kid` / HMAC key pair an ACME client (Traefik, certbot, Caddy, acme.sh…) registers with at `/acme/directory`. The resulting ACME account can order certificates for exactly what the bound API key may issue.',
+    body: { schema: S.requests.createEab },
+    responses: {
+      201: { description: 'Created; hmac_key is shown once', schema: S.acmeEabCreatedSchema },
+      403: problem('Binding another key requires admin'),
+      404: problem('API key not found, revoked or expired'),
+    },
+  },
+  {
+    method: 'delete',
+    path: '/api/v1/acme/eab/{id}',
+    tag: 'ACME server',
+    summary: 'Revoke an EAB credential',
+    description: 'Also deactivates every ACME account registered with it.',
+    params: [idParam],
+    responses: {
+      200: { description: 'Revoked', schema: S.acmeEabSchema },
+      404: problem('Not found'),
+    },
   },
   {
     method: 'get',

@@ -2,6 +2,7 @@ import 'server-only';
 import { sql } from 'kysely';
 import { db, nowIso } from '@/lib/db';
 import { runIssuance, logEvent, notify } from '@/lib/acme/issue';
+import { expireAbandonedOrders } from '@/lib/acme-server/service';
 
 /**
  * Single-process job runner. Orders are claimed with a conditional UPDATE on
@@ -40,12 +41,15 @@ async function loop(fn: () => Promise<void>, intervalMs: number): Promise<void> 
 
 async function tick(): Promise<void> {
   await releaseStaleLocks();
+  await expireAbandonedOrders();
   if (inflight.size >= MAX_CONCURRENT) return;
 
   const candidates = await db()
     .selectFrom('certificates')
     .select(['id'])
     .where('locked_at', 'is', null)
+    // ACME-server orders wait for the client's CSR; runIssuance would mint a key instead
+    .where('source', '=', 'api')
     .where((eb) =>
       eb.or([
         eb('status', '=', 'pending'),

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { db, nowIso } from '@/lib/db';
 import { sha256Hex, safeEqualHex, randomId } from '@/lib/crypto/secrets';
 import { parseScopes, type Scope } from '@/lib/scopes';
+import type { ApiKeysTable } from '@/lib/db/types';
 
 /**
  * Minted wire format: lc_<prefix8hex>_<secret base64url>
@@ -84,6 +85,31 @@ export async function resolveApiKey(token: string): Promise<ResolvedKey | null> 
 
   const row = candidates.find((c) => safeEqualHex(c.secret_hash, secretHash));
   if (!row) return null;
+
+  const key = await hydrate(row);
+  if (!key) return null;
+
+  // fire-and-forget: last_used_at is telemetry, never block the request on it
+  void db()
+    .updateTable('api_keys')
+    .set({ last_used_at: nowIso() })
+    .where('id', '=', row.id)
+    .execute()
+    .catch(() => {});
+
+  return key;
+}
+
+/**
+ * Current state of a key looked up by id, for callers that authenticated some
+ * other way (an ACME account bound to the key). Null once revoked or expired.
+ */
+export async function resolveApiKeyById(id: string): Promise<ResolvedKey | null> {
+  const row = await db().selectFrom('api_keys').selectAll().where('id', '=', id).executeTakeFirst();
+  return row ? hydrate(row) : null;
+}
+
+async function hydrate(row: ApiKeysTable): Promise<ResolvedKey | null> {
   if (row.revoked_at) return null;
   if (row.expires_at && new Date(row.expires_at) < new Date()) return null;
 
@@ -95,14 +121,6 @@ export async function resolveApiKey(token: string): Promise<ResolvedKey | null> 
 
   const grants: Record<string, Scope[]> = {};
   for (const g of grantRows) grants[g.domain_id] = parseScopes(g.scopes);
-
-  // fire-and-forget: last_used_at is telemetry, never block the request on it
-  void db()
-    .updateTable('api_keys')
-    .set({ last_used_at: nowIso() })
-    .where('id', '=', row.id)
-    .execute()
-    .catch(() => {});
 
   return {
     id: row.id,

@@ -3,6 +3,7 @@ import {
   createApiKeySchema,
   createCertificateSchema,
   createDomainSchema,
+  createEabSchema,
   dnsRecordSchema,
   loginSchema,
   metadataSchema,
@@ -321,6 +322,34 @@ export const acmeAccountSchema = named(
   }),
 );
 
+const acmeEabFields = {
+  id: z.string().meta({ description: 'The EAB key id (`kid`).', example: 'eab_3q2-7wEBAQEBAQEB' }),
+  api_key_id: z.string(),
+  created_at: z.string(),
+  last_used_at: z.string().nullable(),
+  revoked_at: z.string().nullable(),
+  accounts: z.int().meta({ description: 'Active ACME accounts registered with this credential.' }),
+};
+
+export const acmeEabSchema = named(
+  'AcmeEabKey',
+  z.object(acmeEabFields),
+  'External Account Binding credential: ACME accounts registered with it act as the API key.',
+);
+export type AcmeEabResource = z.infer<typeof acmeEabSchema>;
+
+export const acmeEabCreatedSchema = named(
+  'AcmeEabKeyCreated',
+  z.object({
+    ...acmeEabFields,
+    hmac_key: z.string().meta({ description: 'Base64url HMAC key. Shown once.' }),
+    directory_url: z.string().meta({ description: 'ACME directory to point the client at.' }),
+  }),
+);
+export type AcmeEabCreated = z.infer<typeof acmeEabCreatedSchema>;
+
+export const acmeEabListSchema = named('AcmeEabKeyList', z.object({ items: z.array(acmeEabSchema) }));
+
 export const dnsListSchema = named(
   'DnsRecordList',
   z.object({
@@ -399,5 +428,6 @@ export const requests = {
   updateGrants: named('UpdateGrantsRequest', updateGrantsSchema),
   login: named('LoginRequest', loginSchema),
   setup: named('SetupRequest', setupSchema),
+  createEab: named('CreateAcmeEabRequest', createEabSchema),
   token: tokenRequestSchema,
 };
