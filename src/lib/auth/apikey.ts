@@ -100,15 +100,6 @@ export async function resolveApiKey(token: string): Promise<ResolvedKey | null> 
   return key;
 }
 
-/**
- * Current state of a key looked up by id, for callers that authenticated some
- * other way (an ACME account bound to the key). Null once revoked or expired.
- */
-export async function resolveApiKeyById(id: string): Promise<ResolvedKey | null> {
-  const row = await db().selectFrom('api_keys').selectAll().where('id', '=', id).executeTakeFirst();
-  return row ? hydrate(row) : null;
-}
-
 async function hydrate(row: ApiKeysTable): Promise<ResolvedKey | null> {
   if (row.revoked_at) return null;
   if (row.expires_at && new Date(row.expires_at) < new Date()) return null;

@@ -117,11 +117,12 @@ export const createDomainSchema = z.object({
 const scopeEnum = z.enum(DOMAIN_SCOPES as [string, ...string[]]);
 
 export const createEabSchema = z.object({
-  api_key_id: z
-    .string()
+  name: z.string().trim().min(1).max(80),
+  expires_at: z.iso.datetime().nullish(),
+  domain_ids: z
+    .array(z.string().min(1))
     .min(1)
-    .optional()
-    .meta({ description: 'Key to bind. Defaults to the calling key; another key needs admin.' }),
+    .meta({ description: 'Managed domains the ACME client may request certificates under.' }),
 });
 
 export const createApiKeySchema = z.object({

@@ -5,12 +5,11 @@ import { db, nowIso } from '@/lib/db';
 import type {
   AcmeAccountsTable,
   AcmeAuthorizationsTable,
+  AcmeEabKeysTable,
   AcmeOrdersTable,
 } from '@/lib/db/types';
 import { randomId, decryptSecret } from '@/lib/crypto/secrets';
-import { resolveApiKeyById, type ResolvedKey } from '@/lib/auth/apikey';
 import { audit } from '@/lib/auth/guard';
-import { hasScope, SCOPES, type Scope } from '@/lib/scopes';
 import { belongsToDomain, fqdnSchema } from '@/lib/validation';
 import { createCertificate, listDomains } from '@/lib/certificates';
 import { acme } from '@/lib/acme/client';
@@ -20,6 +19,7 @@ import {
   revoke,
   validateExternalOrder,
 } from '@/lib/acme/issue';
+import { eabDomainIds, eabUsable } from './eab';
 import {
   AcmeError,
   decodeJson,
@@ -37,9 +37,9 @@ import {
 /**
  * RFC 8555 resources on top of the existing issuance pipeline.
  *
- * Who may order what is decided by the API key the account was bound to at
- * registration (External Account Binding), re-read on every request — not by
- * the challenge. Only names under a managed domain are accepted.
+ * Who may order what is decided by the EAB credential the account registered
+ * with — its domain list, expiry and revocation are re-read on every request —
+ * not by the challenge. Only names under one of its managed domains pass.
  *
  * The client sees a plain http-01 challenge, but nobody fetches
  * /.well-known/acme-challenge: these are LAN hosts this server usually cannot
@@ -58,24 +58,23 @@ const RETRY_AFTER = { 'retry-after': '3' };
 
 interface Session {
   account: AcmeAccountsTable;
-  key: ResolvedKey;
+  credential: AcmeEabKeysTable;
   payload: Record<string, unknown> | null;
 }
 
-/** kid-authenticated request whose API key is still alive. */
+/** kid-authenticated request whose EAB credential is still alive. */
 async function session(req: Request): Promise<Session> {
   const v = await verifyRequest(req, 'kid');
   const account = v.account!;
-  const key = await resolveApiKeyById(account.api_key_id);
-  if (!key) {
-    throw new AcmeError('unauthorized', 'The API key this account is bound to is revoked or expired');
+  const credential = await db()
+    .selectFrom('acme_eab_keys')
+    .selectAll()
+    .where('id', '=', account.eab_id)
+    .executeTakeFirst();
+  if (!credential || !eabUsable(credential)) {
+    throw new AcmeError('unauthorized', 'The EAB credential this account registered with is revoked or expired');
   }
-  return { account, key, payload: v.payload };
-}
-
-function keyHasScope(key: ResolvedKey, domainId: string, scope: Scope): boolean {
-  if (key.isAdmin) return true;
-  return hasScope([...key.globalScopes, ...(key.grants[domainId] ?? [])], scope);
+  return { account, credential, payload: v.payload };
 }
 
 function accountView(account: AcmeAccountsTable, u: Urls) {
@@ -131,7 +130,7 @@ export async function newAccount(req: Request): Promise<Response> {
   if (eab === undefined) {
     throw new AcmeError(
       'externalAccountRequired',
-      'Registration needs an External Account Binding; create one with POST /api/v1/acme/eab',
+      'Registration needs an External Account Binding; create a credential in the local-cert console',
     );
   }
   if (!isFlattenedJws(eab)) throw new AcmeError('malformed', 'externalAccountBinding must be a flattened JWS');
@@ -146,8 +145,8 @@ export async function newAccount(req: Request): Promise<Response> {
     .selectAll()
     .where('id', '=', kid)
     .executeTakeFirst();
-  if (!credential || credential.revoked_at) {
-    throw new AcmeError('unauthorized', 'Unknown or revoked External Account Binding key id');
+  if (!credential || !eabUsable(credential)) {
+    throw new AcmeError('unauthorized', 'Unknown, revoked or expired External Account Binding key id');
   }
 
   let boundJwk: unknown;
@@ -164,13 +163,8 @@ export async function newAccount(req: Request): Promise<Response> {
     throw new AcmeError('malformed', 'External Account Binding does not cover this account key');
   }
 
-  if (!(await resolveApiKeyById(credential.api_key_id))) {
-    throw new AcmeError('unauthorized', 'The API key behind this binding is revoked or expired');
-  }
-
   const account: AcmeAccountsTable = {
     id: randomId('acct'),
-    api_key_id: credential.api_key_id,
     eab_id: credential.id,
     jwk: JSON.stringify(v.jwk),
     thumbprint: v.thumbprint,
@@ -184,11 +178,7 @@ export async function newAccount(req: Request): Promise<Response> {
     .set({ last_used_at: nowIso() })
     .where('id', '=', credential.id)
     .execute();
-  await audit(credential.api_key_id, 'acme.account.create', {
-    target: account.id,
-    detail: { eab: credential.id },
-    req,
-  });
+  await audit(credential.id, 'acme.account.create', { target: account.id, req });
 
   return json(accountView(account, u), 201, { location: u.account(account.id) });
 }
@@ -206,7 +196,7 @@ export async function updateAccount(req: Request, id: string): Promise<Response>
   }
   if (Object.keys(patch).length > 0) {
     await db().updateTable('acme_accounts').set(patch).where('id', '=', id).execute();
-    if (patch.status) await audit(account.api_key_id, 'acme.account.deactivate', { target: id, req });
+    if (patch.status) await audit(account.eab_id, 'acme.account.deactivate', { target: id, req });
   }
   return json(accountView({ ...account, ...patch }, u));
 }
@@ -314,7 +304,7 @@ function parseIdentifiers(raw: unknown): string[] {
 
 export async function newOrder(req: Request): Promise<Response> {
   const u = urls(req);
-  const { account, key, payload } = await session(req);
+  const { account, credential, payload } = await session(req);
   const names = parseIdentifiers(payload?.identifiers);
 
   const domains = await listDomains();
@@ -329,8 +319,8 @@ export async function newOrder(req: Request): Promise<Response> {
   if (covering.some((d) => d.id !== domain.id)) {
     throw new AcmeError('rejectedIdentifier', 'All identifiers of an order must belong to the same managed domain');
   }
-  if (!keyHasScope(key, domain.id, SCOPES.CERT_ISSUE)) {
-    throw new AcmeError('unauthorized', `The API key behind this account lacks "${SCOPES.CERT_ISSUE}" on ${domain.name}`);
+  if (!eabDomainIds(credential).includes(domain.id)) {
+    throw new AcmeError('unauthorized', `This EAB credential is not allowed to issue under ${domain.name}`);
   }
 
   // A client retrying newOrder gets its live order back instead of a second upstream order.
@@ -355,7 +345,7 @@ export async function newOrder(req: Request): Promise<Response> {
     webhookUrl: null,
     dnsRecord: null,
     metadata: { acme_account: account.id },
-    createdBy: key.id,
+    createdBy: credential.id,
     idempotencyKey: null,
     source: 'acme',
   });
@@ -389,7 +379,7 @@ export async function newOrder(req: Request): Promise<Response> {
     )
     .execute();
 
-  await audit(key.id, 'acme.order.create', {
+  await audit(credential.id, 'acme.order.create', {
     target: cert.id,
     detail: { order: order.id, account: account.id, domains: names },
     req,
@@ -538,7 +528,7 @@ function csrToPem(b64url: string): string {
 
 export async function finalizeOrder(req: Request, id: string): Promise<Response> {
   const u = urls(req);
-  const { account, key, payload } = await session(req);
+  const { account, credential, payload } = await session(req);
   const order = await ownedOrder(account, id);
 
   const state = orderStatus(order, await authzsOf(order.id));
@@ -571,7 +561,7 @@ export async function finalizeOrder(req: Request, id: string): Promise<Response>
   if (Number(claimed.numUpdatedRows ?? 0) === 0) {
     return orderResponse(await ownedOrder(account, id), u);
   }
-  await audit(key.id, 'acme.order.finalize', { target: order.certificate_id, detail: { order: order.id }, req });
+  await audit(credential.id, 'acme.order.finalize', { target: order.certificate_id, detail: { order: order.id }, req });
 
   const work = finalizeExternalOrder(order.certificate_id, order.upstream_order_url, csrPem)
     .then(() => db().updateTable('acme_orders').set({ status: 'valid' }).where('id', '=', order.id).execute())
@@ -613,7 +603,7 @@ export async function downloadCertificate(req: Request, orderId: string): Promis
 }
 
 export async function revokeCertificate(req: Request): Promise<Response> {
-  const { account, key, payload } = await session(req);
+  const { account, credential, payload } = await session(req);
   if (typeof payload?.certificate !== 'string') throw new AcmeError('malformed', '"certificate" is required');
   const reason = payload.reason === undefined ? 0 : Number(payload.reason);
   if (!Number.isInteger(reason) || reason < 0 || reason > 10 || reason === 7) {
@@ -630,18 +620,15 @@ export async function revokeCertificate(req: Request): Promise<Response> {
   const cert = await db()
     .selectFrom('certificates')
     .innerJoin('acme_orders', 'acme_orders.certificate_id', 'certificates.id')
-    .select(['certificates.id', 'certificates.status', 'certificates.domain_id'])
+    .select(['certificates.id', 'certificates.status'])
     .where('certificates.fingerprint_sha256', '=', fingerprint)
     .where('acme_orders.account_id', '=', account.id)
     .executeTakeFirst();
   if (!cert) throw new AcmeError('unauthorized', 'This account did not issue that certificate');
   if (cert.status === 'revoked') throw new AcmeError('alreadyRevoked', 'Certificate is already revoked');
-  if (!keyHasScope(key, cert.domain_id, SCOPES.CERT_REVOKE)) {
-    throw new AcmeError('unauthorized', `The API key behind this account lacks "${SCOPES.CERT_REVOKE}"`);
-  }
 
   await revoke(cert.id, reason);
-  await audit(key.id, 'acme.certificate.revoke', { target: cert.id, detail: { reason }, req });
+  await audit(credential.id, 'acme.certificate.revoke', { target: cert.id, detail: { reason }, req });
   return new Response(null, { status: 200 });
 }
 

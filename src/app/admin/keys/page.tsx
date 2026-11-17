@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { parseScopes } from '@/lib/scopes';
 import { requireAdminSession } from '@/lib/auth/guard';
+import { listEabKeys } from '@/lib/acme-server/eab';
 import { KeysClient } from './keys-client';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,7 @@ export default async function KeysPage() {
   return (
     <KeysClient
       domains={domains}
+      eabKeys={await listEabKeys()}
       keys={keys.map((k) => ({
         id: k.id,
         name: k.name,

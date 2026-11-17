@@ -324,8 +324,10 @@ export const acmeAccountSchema = named(
 
 const acmeEabFields = {
   id: z.string().meta({ description: 'The EAB key id (`kid`).', example: 'eab_3q2-7wEBAQEBAQEB' }),
-  api_key_id: z.string(),
+  name: z.string(),
+  domains: z.array(z.object({ id: z.string(), name: z.string() })),
   created_at: z.string(),
+  expires_at: z.string().nullable(),
   last_used_at: z.string().nullable(),
   revoked_at: z.string().nullable(),
   accounts: z.int().meta({ description: 'Active ACME accounts registered with this credential.' }),
@@ -334,7 +336,7 @@ const acmeEabFields = {
 export const acmeEabSchema = named(
   'AcmeEabKey',
   z.object(acmeEabFields),
-  'External Account Binding credential: ACME accounts registered with it act as the API key.',
+  'External Account Binding credential: ACME accounts registered with it may order under its domains.',
 );
 export type AcmeEabResource = z.infer<typeof acmeEabSchema>;
 

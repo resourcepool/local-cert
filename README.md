@@ -500,28 +500,37 @@ TXT `_acme-challenge` dans la zone Route53, validation DNS-01 auprès de Let's
 Encrypt, nettoyage — et le challenge passe à `valid` quand c'est terminé. Le
 certificat est ensuite émis par Let's Encrypt à partir du CSR du client.
 
-Ce qui décide du droit d'émettre, c'est la clé d'API :
+Ce qui décide du droit d'émettre, c'est l'**identifiant EAB** avec lequel le
+client s'est enregistré :
 
 - un nom hors des domaines gérés est refusé (`rejectedIdentifier`) ;
-- la clé doit porter `cert:issue` sur le domaine concerné (`unauthorized`) ;
+- le domaine doit faire partie de ceux de l'identifiant (`unauthorized`) ;
 - tous les noms d'un ordre doivent appartenir à la même zone gérée.
 
-### Rattacher un client à une clé d'API
+### Identifiants EAB
 
-Le lien se fait par External Account Binding, une fois, à l'enregistrement du
-client. La clé d'API ne circule jamais dans les requêtes ACME.
+Ils se gèrent dans la console, page **Clés & droits**, à côté des clés d'API :
+un nom, une date d'expiration facultative et les domaines autorisés. La console
+affiche alors, une seule fois, les trois valeurs à donner au client : l'URL du
+directory, le `kid` et la clé HMAC.
+
+Le client s'en sert une fois, pour enregistrer son compte ACME (External Account
+Binding) ; ensuite il signe avec sa propre clé. L'identifiant est relu à chaque
+requête : le révoquer, ou le laisser expirer, coupe aussi les clients déjà
+enregistrés. Un même identifiant peut servir à plusieurs clients ; un par client
+permet de les révoquer séparément.
+
+Même chose par l'API, réservée aux admins (session console ou clé admin) :
 
 ```bash
 curl -X POST https://certs.example.com/api/v1/acme/eab \
-  -H "Authorization: Bearer lc_..."
+  -H "Authorization: Bearer <clé admin>" -H "Content-Type: application/json" \
+  -d '{"name": "traefik-dokploy", "expires_at": null, "domain_ids": ["dom_…"]}'
 # { "id": "eab_…", "hmac_key": "…", "directory_url": "https://certs.example.com/acme/directory", … }
 ```
 
-`hmac_key` n'est affichée qu'une fois. Un admin peut lier une autre clé avec
-`{"api_key_id": "key_…"}`. `GET /api/v1/acme/eab` liste les identifiants,
-`DELETE /api/v1/acme/eab/{id}` en révoque un et désactive les comptes ACME
-enregistrés avec. Révoquer ou laisser expirer la clé d'API coupe aussi l'accès :
-ses droits sont relus à chaque requête.
+`GET /api/v1/acme/eab` les liste, `DELETE /api/v1/acme/eab/{id}` en révoque un
+(`?purge=true` le supprime, avec ses comptes ACME ; les certificats émis restent).
 
 ```yaml
 # Traefik
@@ -555,7 +564,8 @@ certbot certonly --standalone -d nas.home.example.com \
 - Ces certificats apparaissent dans la console (`key_type: external`) sans clé
   privée ni renouvellement automatique : la clé reste chez le client, qui
   renouvelle lui-même. `POST …/renew` les refuse.
-- Révocation ACME (`revoke-cert`) : la clé liée doit porter `cert:revoke`.
+- Révocation ACME (`revoke-cert`) : un compte peut révoquer les certificats qu'il
+  a lui-même obtenus.
 - Non implémenté : `keyChange` (rotation de clé de compte) et la révocation
   signée par la clé du certificat.
 

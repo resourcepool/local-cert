@@ -308,8 +308,11 @@ export const ROUTES: RouteDef[] = [
     path: '/api/v1/acme/eab',
     tag: 'ACME server',
     summary: 'List EAB credentials',
-    description: 'A key sees its own credentials, an admin sees all of them.',
-    responses: { 200: { description: 'OK', schema: S.acmeEabListSchema } },
+    description: 'Admin only (console session or admin key).',
+    responses: {
+      200: { description: 'OK', schema: S.acmeEabListSchema },
+      403: problem('Admin privileges required'),
+    },
   },
   {
     method: 'post',
@@ -317,23 +320,28 @@ export const ROUTES: RouteDef[] = [
     tag: 'ACME server',
     summary: 'Create an EAB credential',
     description:
-      'Returns the `kid` / HMAC key pair an ACME client (Traefik, certbot, Caddy, acme.sh…) registers with at `/acme/directory`. The resulting ACME account can order certificates for exactly what the bound API key may issue.',
-    body: { schema: S.requests.createEab },
+      'Admin only. Returns the `kid` / HMAC key pair an ACME client (Traefik, certbot, Caddy, acme.sh…) registers with at `/acme/directory`. The resulting ACME accounts can order certificates under the listed managed domains, until the credential expires or is revoked.',
+    body: { schema: S.requests.createEab, required: true },
     responses: {
       201: { description: 'Created; hmac_key is shown once', schema: S.acmeEabCreatedSchema },
-      403: problem('Binding another key requires admin'),
-      404: problem('API key not found, revoked or expired'),
+      403: problem('Admin privileges required'),
+      422: problem('Invalid body or unknown domain'),
     },
   },
   {
     method: 'delete',
     path: '/api/v1/acme/eab/{id}',
     tag: 'ACME server',
-    summary: 'Revoke an EAB credential',
-    description: 'Also deactivates every ACME account registered with it.',
-    params: [idParam],
+    summary: 'Revoke, and optionally purge, an EAB credential',
+    description:
+      'Admin only. Revoking deactivates every ACME account registered with it. With purge the credential, its accounts and their orders are deleted; issued certificates stay.',
+    params: [
+      idParam,
+      { name: 'purge', in: 'query', schema: bool, description: 'Also delete the row.' },
+    ],
     responses: {
       200: { description: 'Revoked', schema: S.acmeEabSchema },
+      403: problem('Admin privileges required'),
       404: problem('Not found'),
     },
   },

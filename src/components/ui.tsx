@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 export function Panel({
   title,
@@ -29,6 +29,59 @@ export function Panel({
       )}
       <div className="p-4">{children}</div>
     </section>
+  );
+}
+
+/** Centered dialog. Closes on Escape and on a click outside the panel. */
+export function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = overflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-950/80 p-4 backdrop-blur-sm sm:items-center"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="w-full max-w-lg rounded border border-ink-700 bg-ink-900 shadow-2xl"
+      >
+        <header className="flex items-center justify-between gap-3 border-b border-ink-700 px-4 py-2.5">
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-400">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fermer"
+            className="text-xs text-ink-400 hover:text-ink-100"
+          >
+            fermer
+          </button>
+        </header>
+        <div className="max-h-[75vh] overflow-y-auto p-4">{children}</div>
+      </section>
+    </div>
   );
 }
 

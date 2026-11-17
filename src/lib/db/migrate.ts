@@ -249,6 +249,87 @@ const STEPS: Step[] = [
         .execute();
     },
   },
+  {
+    id: '004_eab_standalone',
+    up: async (k) => {
+      // EAB credentials stop borrowing an API key's grants: they carry their
+      // own name, expiry and domain list. api_key_id was NOT NULL and SQLite
+      // cannot relax that in place, so the 003 tables are rebuilt. Existing
+      // credentials and ACME accounts are dropped (clients re-register with a
+      // new credential); issued certificates are untouched.
+      await k.schema.dropTable('acme_authorizations').execute();
+      await k.schema.dropTable('acme_orders').execute();
+      await k.schema.dropTable('acme_accounts').execute();
+      await k.schema.dropTable('acme_eab_keys').execute();
+
+      await k.schema
+        .createTable('acme_eab_keys')
+        .addColumn('id', TEXT, (c) => c.primaryKey())
+        .addColumn('name', TEXT, (c) => c.notNull())
+        .addColumn('hmac_enc', TEXT, (c) => c.notNull())
+        .addColumn('domain_ids', TEXT, (c) => c.notNull().defaultTo('[]'))
+        .addColumn('created_by', TEXT, (c) => c.notNull())
+        .addColumn('created_at', TEXT, (c) => c.notNull())
+        .addColumn('expires_at', TEXT)
+        .addColumn('last_used_at', TEXT)
+        .addColumn('revoked_at', TEXT)
+        .execute();
+
+      await k.schema
+        .createTable('acme_accounts')
+        .addColumn('id', TEXT, (c) => c.primaryKey())
+        .addColumn('eab_id', TEXT, (c) =>
+          c.notNull().references('acme_eab_keys.id').onDelete('cascade'),
+        )
+        .addColumn('jwk', TEXT, (c) => c.notNull())
+        .addColumn('thumbprint', TEXT, (c) => c.notNull().unique())
+        .addColumn('contact', TEXT, (c) => c.notNull().defaultTo('[]'))
+        .addColumn('status', TEXT, (c) => c.notNull())
+        .addColumn('created_at', TEXT, (c) => c.notNull())
+        .execute();
+
+      await k.schema
+        .createTable('acme_orders')
+        .addColumn('id', TEXT, (c) => c.primaryKey())
+        .addColumn('account_id', TEXT, (c) =>
+          c.notNull().references('acme_accounts.id').onDelete('cascade'),
+        )
+        .addColumn('certificate_id', TEXT, (c) =>
+          c.notNull().references('certificates.id').onDelete('cascade'),
+        )
+        .addColumn('identifiers', TEXT, (c) => c.notNull())
+        .addColumn('status', TEXT, (c) => c.notNull())
+        .addColumn('upstream_status', TEXT, (c) => c.notNull())
+        .addColumn('upstream_order_url', TEXT)
+        .addColumn('error', TEXT)
+        .addColumn('expires_at', TEXT, (c) => c.notNull())
+        .addColumn('created_at', TEXT, (c) => c.notNull())
+        .execute();
+      await k.schema
+        .createIndex('idx_acme_orders_account')
+        .on('acme_orders')
+        .column('account_id')
+        .execute();
+
+      await k.schema
+        .createTable('acme_authorizations')
+        .addColumn('id', TEXT, (c) => c.primaryKey())
+        .addColumn('order_id', TEXT, (c) =>
+          c.notNull().references('acme_orders.id').onDelete('cascade'),
+        )
+        .addColumn('identifier', TEXT, (c) => c.notNull())
+        .addColumn('wildcard', INT, (c) => c.notNull().defaultTo(0))
+        .addColumn('token', TEXT, (c) => c.notNull())
+        .addColumn('responded_type', TEXT)
+        .addColumn('created_at', TEXT, (c) => c.notNull())
+        .execute();
+      await k.schema
+        .createIndex('idx_acme_authz_order')
+        .on('acme_authorizations')
+        .column('order_id')
+        .execute();
+    },
+  },
 ];
 
 let migrated = false;

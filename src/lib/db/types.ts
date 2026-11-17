@@ -24,23 +24,26 @@ export interface Database {
   acme_nonces: AcmeNoncesTable;
 }
 
-/** External Account Binding credential: lets an ACME client act as an API key. */
+/** External Account Binding credential: what an ACME client registers with. */
 export interface AcmeEabKeysTable {
   /** the EAB `kid` */
   id: string;
-  api_key_id: string;
+  name: string;
   /** AES-256-GCM envelope of the base64url HMAC key */
   hmac_enc: string;
+  /** JSON array of managed domain ids its ACME accounts may order under */
+  domain_ids: string;
   created_by: string;
   created_at: string;
+  /** ISO date or null = never expires */
+  expires_at: string | null;
   last_used_at: string | null;
   revoked_at: string | null;
 }
 
 export interface AcmeAccountsTable {
   id: string;
-  /** the API key whose grants decide what this account may order */
-  api_key_id: string;
+  /** the credential whose domain list decides what this account may order */
   eab_id: string;
   /** JSON public JWK of the account key */
   jwk: string;

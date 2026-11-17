@@ -2,8 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Button, Copyable, ErrorNote, Field, Input, Panel, api } from '@/components/ui';
+import { Button, Copyable, ErrorNote, Field, Input, Modal, Panel, api } from '@/components/ui';
 import { DOMAIN_SCOPES, SCOPE_LABELS } from '@/lib/scopes';
+import type { AcmeEabCreated, AcmeEabResource } from '@/lib/api/schemas';
 
 export interface KeyView {
   id: string;
@@ -28,8 +29,26 @@ const PRESETS: Record<string, string[]> = {
   'Opérateur DNS': ['dns:read', 'dns:write'],
 };
 
-export function KeysClient({ keys, domains }: { keys: KeyView[]; domains: DomainRef[] }) {
+const isExpired = (at: string | null) => !!at && new Date(at) < new Date();
+/** End of the chosen day, so "expires on the 3rd" still works on the 3rd. */
+const endOfDay = (date: string) => new Date(`${date}T23:59:59`).toISOString();
+
+export function KeysClient({
+  keys,
+  eabKeys,
+  domains,
+}: {
+  keys: KeyView[];
+  eabKeys: AcmeEabResource[];
+  domains: DomainRef[];
+}) {
   const router = useRouter();
+  const [modal, setModal] = useState<'key' | 'eab' | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [eabName, setEabName] = useState('');
+  const [eabExpiresAt, setEabExpiresAt] = useState('');
+  const [eabDomains, setEabDomains] = useState<Set<string>>(new Set());
+  const [mintedEab, setMintedEab] = useState<AcmeEabCreated | null>(null);
   const [name, setName] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [expiresAt, setExpiresAt] = useState('');
@@ -59,9 +78,55 @@ export function KeysClient({ keys, domains }: { keys: KeyView[]; domains: Domain
       .map(([domain_id, scopes]) => ({ domain_id, scopes: [...scopes] }));
   }
 
+  function openModal(which: 'key' | 'eab') {
+    setFormError(null);
+    setEditing(null);
+    setDraft({});
+    setModal(which);
+  }
+
+  function closeModal() {
+    setModal(null);
+    setFormError(null);
+    setDraft({});
+  }
+
+  async function createEab(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    try {
+      const res = await api<AcmeEabCreated>('/api/v1/acme/eab', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: eabName,
+          expires_at: eabExpiresAt ? endOfDay(eabExpiresAt) : null,
+          domain_ids: [...eabDomains],
+        }),
+      });
+      setMintedEab(res);
+      setEabName('');
+      setEabExpiresAt('');
+      setEabDomains(new Set());
+      setModal(null);
+      router.refresh();
+    } catch (err) {
+      setFormError((err as Error).message);
+    }
+  }
+
+  async function removeEab(id: string, purge: boolean) {
+    setError(null);
+    try {
+      await api(`/api/v1/acme/eab/${id}${purge ? '?purge=true' : ''}`, { method: 'DELETE' });
+      router.refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function create(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setFormError(null);
     try {
       const res = await api<{ name: string; token: string }>('/api/admin/keys', {
         method: 'POST',
@@ -77,9 +142,10 @@ export function KeysClient({ keys, domains }: { keys: KeyView[]; domains: Domain
       setIsAdmin(false);
       setExpiresAt('');
       setDraft({});
+      setModal(null);
       router.refresh();
     } catch (err) {
-      setError((err as Error).message);
+      setFormError((err as Error).message);
     }
   }
 
@@ -120,10 +186,44 @@ export function KeysClient({ keys, domains }: { keys: KeyView[]; domains: Domain
         </div>
       )}
 
+      {mintedEab && (
+        <div className="rounded border border-accent/50 bg-accent/10 p-4">
+          <p className="text-xs text-accent">
+            Identifiant EAB « {mintedEab.name} » créé. La clé HMAC n&apos;est affichée qu&apos;une fois.
+          </p>
+          <dl className="mt-2 space-y-1.5 rounded border border-accent/30 bg-ink-950 px-3 py-2 text-[11px]">
+            {(
+              [
+                ['Directory ACME', mintedEab.directory_url],
+                ['Key ID (kid)', mintedEab.id],
+                ['Clé HMAC', mintedEab.hmac_key],
+              ] as const
+            ).map(([label, value]) => (
+              <div key={label} className="flex flex-wrap items-baseline gap-x-3">
+                <dt className="w-28 shrink-0 uppercase tracking-wider text-ink-400">{label}</dt>
+                <dd className="min-w-0">
+                  <Copyable value={value} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <Button variant="ghost" className="mt-2" onClick={() => setMintedEab(null)}>
+            j&apos;ai noté la clé HMAC
+          </Button>
+        </div>
+      )}
+
       <ErrorNote>{error}</ErrorNote>
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
-        <Panel title="Clés d’API">
+      <div className="space-y-5">
+        <Panel
+          title="Clés d’API"
+          action={
+            <Button variant="primary" onClick={() => openModal('key')}>
+              + nouvelle clé
+            </Button>
+          }
+        >
           {keys.length === 0 ? (
             <p className="py-4 text-center text-xs text-ink-400">Aucune clé.</p>
           ) : (
@@ -221,7 +321,89 @@ export function KeysClient({ keys, domains }: { keys: KeyView[]; domains: Domain
           )}
         </Panel>
 
-        <Panel title="Nouvelle clé">
+        <Panel
+          title="Identifiants EAB — clients ACME"
+          action={
+            <Button variant="primary" onClick={() => openModal('eab')}>
+              + nouvel identifiant
+            </Button>
+          }
+        >
+          {eabKeys.length === 0 ? (
+            <p className="py-4 text-center text-xs text-ink-400">
+              Aucun identifiant. Un client ACME (Traefik, certbot, Caddy…) s&apos;enregistre avec l&apos;un
+              d&apos;eux sur <code className="text-ink-300">/acme/directory</code>.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {eabKeys.map((k) => {
+                const expired = isExpired(k.expires_at);
+                const dead = !!k.revoked_at || expired;
+                return (
+                  <div
+                    key={k.id}
+                    className={`rounded border px-3 py-2.5 ${
+                      dead ? 'border-ink-800 bg-ink-900/40 opacity-60' : 'border-ink-700 bg-ink-900/60'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-ink-100">{k.name}</span>
+                      <code className="rounded border border-ink-700 px-1 text-[10px] text-ink-400">{k.id}</code>
+                      {k.revoked_at ? (
+                        <span className="rounded border border-danger/40 bg-danger/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-danger">
+                          révoqué
+                        </span>
+                      ) : (
+                        expired && (
+                          <span className="rounded border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-warn">
+                            expiré
+                          </span>
+                        )
+                      )}
+                      <div className="ml-auto flex gap-1.5">
+                        {!k.revoked_at && <Button onClick={() => removeEab(k.id, false)}>révoquer</Button>}
+                        <Button variant="danger" onClick={() => removeEab(k.id, true)}>
+                          supprimer
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="mt-1.5 flex flex-wrap gap-x-4 text-[11px] text-ink-600">
+                      <span>créé {k.created_at.slice(0, 10)}</span>
+                      <span>
+                        dernier enregistrement{' '}
+                        {k.last_used_at ? k.last_used_at.slice(0, 16).replace('T', ' ') : 'jamais'}
+                      </span>
+                      <span>
+                        {k.accounts} compte{k.accounts > 1 ? 's' : ''} ACME actif{k.accounts > 1 ? 's' : ''}
+                      </span>
+                      {k.expires_at && <span>expire {k.expires_at.slice(0, 10)}</span>}
+                    </div>
+
+                    {k.domains.length === 0 ? (
+                      <p className="mt-2 text-[11px] text-ink-600">
+                        Aucun domaine — l&apos;identifiant ne peut rien émettre.
+                      </p>
+                    ) : (
+                      <p className="mt-2 flex flex-wrap items-baseline gap-2 text-[11px]">
+                        <span className="text-ink-600">certificats pour</span>
+                        {k.domains.map((d) => (
+                          <span key={d.id} className="text-ink-300">
+                            {d.name}
+                          </span>
+                        ))}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      {modal === 'key' && (
+        <Modal title="Nouvelle clé d’API" onClose={closeModal}>
           <form onSubmit={create} className="space-y-3">
             <Field label="Nom" hint="ex. nas-salon, ci-deploy">
               <Input required value={name} onChange={(e) => setName(e.target.value)} />
@@ -245,12 +427,65 @@ export function KeysClient({ keys, domains }: { keys: KeyView[]; domains: Domain
               </div>
             )}
 
+            <ErrorNote>{formError}</ErrorNote>
             <Button type="submit" variant="primary" disabled={!name} className="w-full">
               Générer la clé
             </Button>
           </form>
-        </Panel>
-      </div>
+        </Modal>
+      )}
+
+      {modal === 'eab' && (
+        <Modal title="Nouvel identifiant EAB" onClose={closeModal}>
+          <form onSubmit={createEab} className="space-y-3">
+            <Field label="Nom" hint="ex. traefik-dokploy, caddy-nas">
+              <Input required autoFocus autoComplete="off" data-1p-ignore value={eabName} onChange={(e) => setEabName(e.target.value)} />
+            </Field>
+            <Field label="Expiration" hint="vide = pas d’expiration ; passé cette date, les clients déjà enregistrés sont coupés aussi">
+              <Input type="date" value={eabExpiresAt} onChange={(e) => setEabExpiresAt(e.target.value)} />
+            </Field>
+            <div className="border-t border-ink-800 pt-3">
+              <span className="mb-2 block text-[11px] uppercase tracking-wider text-ink-400">
+                Domaines autorisés
+              </span>
+              {domains.length === 0 ? (
+                <p className="text-[11px] text-ink-600">Déclarez d&apos;abord un domaine.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {domains.map((d) => (
+                    <label key={d.id} className="flex items-center gap-2 text-xs text-ink-300">
+                      <input
+                        type="checkbox"
+                        checked={eabDomains.has(d.id)}
+                        onChange={() =>
+                          setEabDomains((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(d.id)) next.delete(d.id);
+                            else next.add(d.id);
+                            return next;
+                          })
+                        }
+                        className="accent-[var(--color-accent)]"
+                      />
+                      <span className="text-ink-100">{d.name}</span>
+                      <span className="text-ink-600">et ses sous-domaines</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <ErrorNote>{formError}</ErrorNote>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={!eabName || eabDomains.size === 0}
+              className="w-full"
+            >
+              Générer l&apos;identifiant
+            </Button>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
