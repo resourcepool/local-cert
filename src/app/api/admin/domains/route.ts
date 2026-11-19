@@ -11,7 +11,9 @@ export const GET = handler(async () => {
 
 export const POST = handler(async (req: Request) => {
   const session = await requireAdminSession();
-  const force = new URL(req.url).searchParams.get('force') === 'true';
+  const query = new URL(req.url).searchParams;
+  const force = query.get('force') === 'true';
+  const pending = query.get('pending') === 'true';
   const body = await req.json().catch(() => null);
-  return ok(await createDomain(session, body, { force, req }), { status: 201 });
+  return ok(await createDomain(session, body, { force, pending, req }), { status: 201 });
 });

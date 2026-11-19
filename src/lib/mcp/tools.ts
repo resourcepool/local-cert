@@ -13,6 +13,7 @@ import {
   updateMetadataSchema,
 } from '@/lib/validation';
 import { createDomain, deleteDomain, listDomainsWithCounts } from '@/lib/admin/domains';
+import { listProviders } from '@/lib/dns/providers';
 import { createApiKey, deleteApiKey, listApiKeys, updateApiKey } from '@/lib/admin/keys';
 import { getStats } from '@/lib/admin/stats';
 import * as certificatesRoute from '@/app/api/v1/certificates/route';
@@ -511,11 +512,26 @@ export const FEATURE_TOOLS: ToolDef[] = [
     run: () => getStats(),
   }),
   tool({
+    name: 'admin_list_providers',
+    title: 'List DNS providers',
+    description:
+      'Lists the DNS provider accounts domains can be registered on (AWS Route53, OVHcloud, ' +
+      'Gandi, GoDaddy, Google Cloud DNS): id, name, type, non-secret settings and domain ' +
+      'count — never a secret. Creating a ' +
+      'provider or changing its credentials is done in the admin console only.',
+    admin: true,
+    requires: 'admin key',
+    group: 'admin',
+    input: empty,
+    annotations: READ,
+    run: () => listProviders(),
+  }),
+  tool({
     name: 'admin_list_domains',
     title: 'List managed domains',
     description:
-      'Lists every managed domain with its Route53 zone id, AWS region, optional role ARN, ' +
-      'default TTL and certificate count.',
+      'Lists every managed domain with its DNS provider, Route53 zone id, default TTL and ' +
+      'certificate count.',
     admin: true,
     requires: 'admin key',
     group: 'admin',
@@ -527,8 +543,10 @@ export const FEATURE_TOOLS: ToolDef[] = [
     name: 'admin_create_domain',
     title: 'Register a managed domain',
     description:
-      'Registers a base domain and the Route53 hosted zone that serves it, after which keys ' +
-      'can be granted scopes on it. Runs a Route53 permission preflight first and refuses if ' +
+      'Registers a base domain and the DNS zone that serves it (route53_zone_id holds the ' +
+      'zone identifier at whichever host the provider is), after which keys ' +
+      'can be granted scopes on it. Pass provider_id (from admin_list_providers) to use that ' +
+      'provider\'s credentials. Runs a Route53 permission preflight first and refuses if ' +
       'the hosted zone does not cover the name, or (unless force=true) if required ' +
       'permissions are missing; the per-check results come back in the error detail.',
     admin: true,

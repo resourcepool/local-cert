@@ -15,6 +15,11 @@ export interface ZoneConfig {
   zoneId: string;
   region: string;
   roleArn: string | null;
+  /**
+   * Static credentials of the DNS provider the zone belongs to. Absent means
+   * the standard SDK chain (env, profile, IRSA, instance role).
+   */
+  auth?: { accessKeyId: string; secretAccessKey: string } | null;
 }
 
 /**
@@ -46,7 +51,7 @@ function markerEnabled(): boolean {
  * and the ephemeral ACME challenge records — those live for ~2 minutes and are
  * covered by the ChangeBatch comment.
  */
-function markerNameFor(name: string): string | null {
+export function markerNameFor(name: string): string | null {
   if (!markerEnabled()) return null;
   if (name.includes('*')) return null;
   if (name.startsWith(MARKER_PREFIX)) return null;
@@ -62,19 +67,21 @@ function comment(detail: string): string {
 const clients = new Map<string, Route53Client>();
 
 export function clientFor(zone: ZoneConfig): Route53Client {
-  const cacheKey = `${zone.region}|${zone.roleArn ?? '-'}`;
+  // The access key id is part of the key: two providers can share a region and
+  // even a role, and a rotated key must not keep serving the old client.
+  const cacheKey = `${zone.region}|${zone.roleArn ?? '-'}|${zone.auth?.accessKeyId ?? '-'}`;
   const existing = clients.get(cacheKey);
   if (existing) return existing;
 
-  // Credentials come from the standard chain (env, profile, IRSA, instance role).
-  // A per-zone role is assumed lazily when aws_role_arn is set.
-  const base = { region: zone.region };
+  // Without provider credentials the standard chain applies. A role, when set,
+  // is assumed lazily from whichever identity that leaves us with.
+  const base = { region: zone.region, credentials: zone.auth ?? undefined };
   const client = zone.roleArn
     ? new Route53Client({
-        ...base,
+        region: zone.region,
         credentials: async () => {
           const { STSClient, AssumeRoleCommand } = await import('@aws-sdk/client-sts');
-          const sts = new STSClient({ region: zone.region });
+          const sts = new STSClient(base);
           const res = await sts.send(
             new AssumeRoleCommand({
               RoleArn: zone.roleArn!,
@@ -238,15 +245,20 @@ export async function listRecords(zone: ZoneConfig): Promise<ZoneRecord[]> {
     startType = res.NextRecordType;
   }
 
-  // Resolve ownership from the markers present in the same listing — no extra
-  // queries, and it survives a DB that has lost track of a record.
+  return withOwnership(out);
+}
+
+/**
+ * Resolve ownership from the markers present in the same listing — no extra
+ * queries, and it survives a DB that has lost track of a record.
+ */
+export function withOwnership(rows: Array<Omit<ZoneRecord, 'managed' | 'marker'>>): ZoneRecord[] {
   const claimed = new Set(
-    out
+    rows
       .filter((r) => r.type === 'TXT' && r.name.startsWith(MARKER_PREFIX))
       .map((r) => r.name.slice(MARKER_PREFIX.length)),
   );
-
-  return out.map((r) => ({
+  return rows.map((r) => ({
     ...r,
     managed: claimed.has(r.name),
     marker: r.type === 'TXT' && r.name.startsWith(MARKER_PREFIX),
@@ -267,7 +279,17 @@ export async function waitForTxtPropagation(
   const hz = await clientFor(zone).send(new GetHostedZoneCommand({ Id: zone.zoneId }));
   const nsNames = hz.DelegationSet?.NameServers ?? [];
   if (nsNames.length === 0) throw new ApiError('upstream_error', 'Hosted zone has no delegation set');
+  return pollTxt(nsNames, name, expected, timeoutMs, onTick);
+}
 
+/** The polling itself, for any host: all that differs is where the NS list comes from. */
+export async function pollTxt(
+  nsNames: string[],
+  name: string,
+  expected: string,
+  timeoutMs = 180_000,
+  onTick?: (msg: string) => void,
+): Promise<void> {
   const sysResolver = new Resolver();
   const nsIps = (
     await Promise.all(

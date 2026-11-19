@@ -4,15 +4,10 @@ import { requireAuth, requireScope, visibleDomainIds, audit } from '@/lib/auth/g
 import { SCOPES } from '@/lib/scopes';
 import { dnsRecordSchema } from '@/lib/validation';
 import { domainForFqdn, listDomains } from '@/lib/certificates';
-import { listRecords, upsertRecord, deleteRecord, waitForSync } from '@/lib/dns/route53';
+import { listRecords, upsertRecord, deleteRecord, waitForSync } from '@/lib/dns/zone';
+import { zoneFor } from '@/lib/dns/providers';
 
 export const dynamic = 'force-dynamic';
-
-const zoneOf = (d: { route53_zone_id: string; aws_region: string; aws_role_arn: string | null }) => ({
-  zoneId: d.route53_zone_id,
-  region: d.aws_region,
-  roleArn: d.aws_role_arn,
-});
 
 /** GET /api/v1/dns/records?domain_id= */
 export const GET = handler(async (req: Request) => {
@@ -29,7 +24,7 @@ export const GET = handler(async (req: Request) => {
   const items: unknown[] = [];
   for (const d of targets) {
     requireScope(principal, d.id, SCOPES.DNS_READ);
-    const records = await listRecords(zoneOf(d));
+    const records = await listRecords(await zoneFor(d));
     items.push({ domain_id: d.id, domain: d.name, records });
   }
   return ok({ items });
@@ -49,8 +44,9 @@ export const PUT = handler(async (req: Request) => {
     throw new ApiError('forbidden', '_acme-challenge records are managed by the issuance worker');
   }
 
-  const changeId = await upsertRecord(zoneOf(domain), fqdn, type, values, ttl);
-  await waitForSync(zoneOf(domain), changeId, 60_000).catch(() => {});
+  const zone = await zoneFor(domain);
+  const changeId = await upsertRecord(zone, fqdn, type, values, ttl);
+  await waitForSync(zone, changeId, 60_000).catch(() => {});
   await audit(principal.keyId, 'dns.upsert', { target: fqdn, detail: { type, values, ttl }, req });
 
   return ok({ fqdn, type, values, ttl, change_id: changeId });
@@ -72,7 +68,7 @@ export const DELETE = handler(async (req: Request) => {
   const domain = await domainForFqdn(fqdn);
   requireScope(principal, domain.id, SCOPES.DNS_WRITE);
 
-  await deleteRecord(zoneOf(domain), fqdn, type, values, ttl);
+  await deleteRecord(await zoneFor(domain), fqdn, type, values, ttl);
   await audit(principal.keyId, 'dns.delete', { target: fqdn, detail: { type }, req });
 
   return ok({ fqdn, type, deleted: true });

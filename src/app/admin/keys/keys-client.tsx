@@ -3,7 +3,9 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button, Copyable, ErrorNote, Field, Input, Modal, Panel, api } from '@/components/ui';
-import { DOMAIN_SCOPES, SCOPE_LABELS } from '@/lib/scopes';
+import { DOMAIN_SCOPES } from '@/lib/scopes';
+import { useT } from '@/lib/i18n/client';
+import { fmt, plural, rich } from '@/lib/i18n/format';
 import type { AcmeEabCreated, AcmeEabResource } from '@/lib/api/schemas';
 
 export interface KeyView {
@@ -23,11 +25,11 @@ export interface KeyView {
 type DomainRef = { id: string; name: string };
 type GrantDraft = Record<string, Set<string>>;
 
-const PRESETS: Record<string, string[]> = {
-  'Hôte (renouvelle son propre cert)': ['cert:read', 'cert:issue', 'cert:renew', 'cert:export'],
-  'Lecture seule': ['cert:read', 'dns:read'],
-  'Opérateur DNS': ['dns:read', 'dns:write'],
-};
+const PRESETS = [
+  { key: 'host', scopes: ['cert:read', 'cert:issue', 'cert:renew', 'cert:export'] },
+  { key: 'readOnly', scopes: ['cert:read', 'dns:read'] },
+  { key: 'dnsOperator', scopes: ['dns:read', 'dns:write'] },
+] as const;
 
 const isExpired = (at: string | null) => !!at && new Date(at) < new Date();
 /** End of the chosen day, so "expires on the 3rd" still works on the 3rd. */
@@ -43,6 +45,7 @@ export function KeysClient({
   domains: DomainRef[];
 }) {
   const router = useRouter();
+  const t = useT();
   const [modal, setModal] = useState<'key' | 'eab' | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [eabName, setEabName] = useState('');
@@ -175,13 +178,13 @@ export function KeysClient({
       {minted && (
         <div className="rounded border border-accent/50 bg-accent/10 p-4">
           <p className="text-xs text-accent">
-            Clé « {minted.name} » créée. Ce token n&apos;est affiché qu&apos;une fois.
+            {fmt(t.keys.minted.created, { name: minted.name })}
           </p>
           <div className="mt-2 rounded border border-accent/30 bg-ink-950 px-3 py-2">
             <Copyable value={minted.token} />
           </div>
           <Button variant="ghost" className="mt-2" onClick={() => setMinted(null)}>
-            j&apos;ai noté le token
+            {t.keys.minted.ack}
           </Button>
         </div>
       )}
@@ -189,18 +192,18 @@ export function KeysClient({
       {mintedEab && (
         <div className="rounded border border-accent/50 bg-accent/10 p-4">
           <p className="text-xs text-accent">
-            Identifiant EAB « {mintedEab.name} » créé. La clé HMAC n&apos;est affichée qu&apos;une fois.
+            {fmt(t.keys.mintedEab.created, { name: mintedEab.name })}
           </p>
           <dl className="mt-2 space-y-1.5 rounded border border-accent/30 bg-ink-950 px-3 py-2 text-[11px]">
             {(
               [
-                ['Directory ACME', mintedEab.directory_url],
-                ['Key ID (kid)', mintedEab.id],
-                ['Clé HMAC', mintedEab.hmac_key],
+                [t.keys.mintedEab.directory, mintedEab.directory_url],
+                [t.keys.mintedEab.kid, mintedEab.id],
+                [t.keys.mintedEab.hmac, mintedEab.hmac_key],
               ] as const
             ).map(([label, value]) => (
               <div key={label} className="flex flex-wrap items-baseline gap-x-3">
-                <dt className="w-28 shrink-0 uppercase tracking-wider text-ink-400">{label}</dt>
+                <dt className="w-28 shrink-0 text-ink-400">{label}</dt>
                 <dd className="min-w-0">
                   <Copyable value={value} />
                 </dd>
@@ -208,7 +211,7 @@ export function KeysClient({
             ))}
           </dl>
           <Button variant="ghost" className="mt-2" onClick={() => setMintedEab(null)}>
-            j&apos;ai noté la clé HMAC
+            {t.keys.mintedEab.ack}
           </Button>
         </div>
       )}
@@ -217,15 +220,15 @@ export function KeysClient({
 
       <div className="space-y-5">
         <Panel
-          title="Clés d’API"
+          title={t.keys.api.title}
           action={
             <Button variant="primary" onClick={() => openModal('key')}>
-              + nouvelle clé
+              {t.keys.api.newKey}
             </Button>
           }
         >
           {keys.length === 0 ? (
-            <p className="py-4 text-center text-xs text-ink-400">Aucune clé.</p>
+            <p className="py-4 text-center text-xs text-ink-400">{t.keys.api.empty}</p>
           ) : (
             <div className="space-y-2">
               {keys.map((k) => (
@@ -237,22 +240,22 @@ export function KeysClient({
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-ink-100">{k.name}</span>
-                    <code className="rounded border border-ink-700 px-1 text-[10px] text-ink-400">
+                    <code className="rounded border border-ink-700 px-1 text-[11px] text-ink-400">
                       {k.opaque ? `#${k.prefix}` : `lc_${k.prefix}_…`}
                     </code>
                     {k.is_own && (
-                      <span className="rounded border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-accent">
-                        mon compte
+                      <span className="rounded border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent">
+                        {t.keys.api.mine}
                       </span>
                     )}
                     {k.is_admin && (
-                      <span className="rounded border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-warn">
-                        admin
+                      <span className="rounded border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[11px] text-warn">
+                        {t.keys.api.admin}
                       </span>
                     )}
                     {k.revoked_at && (
-                      <span className="rounded border border-danger/40 bg-danger/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-danger">
-                        révoquée
+                      <span className="rounded border border-danger/40 bg-danger/10 px-1.5 py-0.5 text-[11px] text-danger">
+                        {t.keys.api.revoked}
                       </span>
                     )}
                     <div className="ml-auto flex gap-1.5">
@@ -266,40 +269,42 @@ export function KeysClient({
                             );
                           }}
                         >
-                          {editing === k.id ? 'fermer' : 'droits'}
+                          {editing === k.id ? t.keys.api.close : t.keys.api.rights}
                         </Button>
                       )}
                       <Button onClick={() => patch(k.id, { revoked: !k.revoked_at })}>
-                        {k.revoked_at ? 'réactiver' : 'révoquer'}
+                        {k.revoked_at ? t.keys.api.reactivate : t.keys.api.revoke}
                       </Button>
                       {!k.is_own && (
                         <Button variant="danger" onClick={() => destroy(k.id)}>
-                          supprimer
+                          {t.keys.api.delete}
                         </Button>
                       )}
                     </div>
                   </div>
 
                   <div className="mt-1.5 flex flex-wrap gap-x-4 text-[11px] text-ink-600">
-                    <span>créée {k.created_at.slice(0, 10)}</span>
+                    <span>{fmt(t.keys.api.createdOn, { date: k.created_at.slice(0, 10) })}</span>
                     <span>
-                      dernier usage {k.last_used_at ? k.last_used_at.slice(0, 16).replace('T', ' ') : 'jamais'}
+                      {fmt(t.keys.api.lastUsed, {
+                        date: k.last_used_at ? k.last_used_at.slice(0, 16).replace('T', ' ') : t.keys.api.never,
+                      })}
                     </span>
-                    {k.expires_at && <span>expire {k.expires_at.slice(0, 10)}</span>}
+                    {k.expires_at && <span>{fmt(t.keys.api.expires, { date: k.expires_at.slice(0, 10) })}</span>}
                   </div>
 
                   {k.is_admin ? (
                     <p className="mt-2 text-[11px] text-ink-400">
-                      Accès total : tous domaines, tous scopes, console d&apos;administration.
+                      {t.keys.api.fullAccess}
                     </p>
                   ) : k.grants.length === 0 ? (
-                    <p className="mt-2 text-[11px] text-ink-600">Aucun droit — la clé ne peut rien faire.</p>
+                    <p className="mt-2 text-[11px] text-ink-600">{t.keys.api.noRights}</p>
                   ) : (
                     <ul className="mt-2 space-y-1">
                       {k.grants.map((g) => (
                         <li key={g.domain_id} className="flex flex-wrap items-baseline gap-2 text-[11px]">
                           <span className="text-ink-300">
-                            {domains.find((d) => d.id === g.domain_id)?.name ?? '(domaine supprimé)'}
+                            {domains.find((d) => d.id === g.domain_id)?.name ?? t.keys.api.deletedDomain}
                           </span>
                           <span className="text-ink-600">{g.scopes.join(' · ')}</span>
                         </li>
@@ -311,7 +316,7 @@ export function KeysClient({
                     <div className="mt-3 space-y-3 border-t border-ink-800 pt-3">
                       <GrantEditor domains={domains} draft={draft} toggle={toggle} applyPreset={applyPreset} />
                       <Button variant="primary" onClick={() => patch(k.id, { grants: draftToGrants() })}>
-                        enregistrer les droits
+                        {t.keys.api.saveRights}
                       </Button>
                     </div>
                   )}
@@ -322,17 +327,16 @@ export function KeysClient({
         </Panel>
 
         <Panel
-          title="Identifiants EAB — clients ACME"
+          title={t.keys.eab.title}
           action={
             <Button variant="primary" onClick={() => openModal('eab')}>
-              + nouvel identifiant
+              {t.keys.eab.newCredential}
             </Button>
           }
         >
           {eabKeys.length === 0 ? (
             <p className="py-4 text-center text-xs text-ink-400">
-              Aucun identifiant. Un client ACME (Traefik, certbot, Caddy…) s&apos;enregistre avec l&apos;un
-              d&apos;eux sur <code className="text-ink-300">/acme/directory</code>.
+              {rich(t.keys.eab.empty, { code: (c) => <code className="text-ink-300">{c}</code> })}
             </p>
           ) : (
             <div className="space-y-2">
@@ -348,45 +352,46 @@ export function KeysClient({
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-ink-100">{k.name}</span>
-                      <code className="rounded border border-ink-700 px-1 text-[10px] text-ink-400">{k.id}</code>
+                      <code className="rounded border border-ink-700 px-1 text-[11px] text-ink-400">{k.id}</code>
                       {k.revoked_at ? (
-                        <span className="rounded border border-danger/40 bg-danger/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-danger">
-                          révoqué
+                        <span className="rounded border border-danger/40 bg-danger/10 px-1.5 py-0.5 text-[11px] text-danger">
+                          {t.keys.eab.revoked}
                         </span>
                       ) : (
                         expired && (
-                          <span className="rounded border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-warn">
-                            expiré
+                          <span className="rounded border border-warn/40 bg-warn/10 px-1.5 py-0.5 text-[11px] text-warn">
+                            {t.keys.eab.expired}
                           </span>
                         )
                       )}
                       <div className="ml-auto flex gap-1.5">
-                        {!k.revoked_at && <Button onClick={() => removeEab(k.id, false)}>révoquer</Button>}
+                        {!k.revoked_at && <Button onClick={() => removeEab(k.id, false)}>{t.keys.eab.revoke}</Button>}
                         <Button variant="danger" onClick={() => removeEab(k.id, true)}>
-                          supprimer
+                          {t.keys.eab.delete}
                         </Button>
                       </div>
                     </div>
 
                     <div className="mt-1.5 flex flex-wrap gap-x-4 text-[11px] text-ink-600">
-                      <span>créé {k.created_at.slice(0, 10)}</span>
+                      <span>{fmt(t.keys.eab.createdOn, { date: k.created_at.slice(0, 10) })}</span>
                       <span>
-                        dernier enregistrement{' '}
-                        {k.last_used_at ? k.last_used_at.slice(0, 16).replace('T', ' ') : 'jamais'}
+                        {fmt(t.keys.eab.lastRegistration, {
+                          date: k.last_used_at ? k.last_used_at.slice(0, 16).replace('T', ' ') : t.keys.eab.never,
+                        })}
                       </span>
                       <span>
-                        {k.accounts} compte{k.accounts > 1 ? 's' : ''} ACME actif{k.accounts > 1 ? 's' : ''}
+                        {plural(k.accounts, t.keys.eab.accountsOne, t.keys.eab.accountsOther)}
                       </span>
-                      {k.expires_at && <span>expire {k.expires_at.slice(0, 10)}</span>}
+                      {k.expires_at && <span>{fmt(t.keys.eab.expires, { date: k.expires_at.slice(0, 10) })}</span>}
                     </div>
 
                     {k.domains.length === 0 ? (
                       <p className="mt-2 text-[11px] text-ink-600">
-                        Aucun domaine — l&apos;identifiant ne peut rien émettre.
+                        {t.keys.eab.noDomain}
                       </p>
                     ) : (
                       <p className="mt-2 flex flex-wrap items-baseline gap-2 text-[11px]">
-                        <span className="text-ink-600">certificats pour</span>
+                        <span className="text-ink-600">{t.keys.eab.certsFor}</span>
                         {k.domains.map((d) => (
                           <span key={d.id} className="text-ink-300">
                             {d.name}
@@ -403,12 +408,12 @@ export function KeysClient({
       </div>
 
       {modal === 'key' && (
-        <Modal title="Nouvelle clé d’API" onClose={closeModal}>
+        <Modal title={t.keys.keyModal.title} onClose={closeModal}>
           <form onSubmit={create} className="space-y-3">
-            <Field label="Nom" hint="ex. nas-salon, ci-deploy">
+            <Field label={t.keys.keyModal.name} hint={t.keys.keyModal.nameHint}>
               <Input required value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
-            <Field label="Expiration" hint="vide = pas d’expiration">
+            <Field label={t.keys.keyModal.expiration} hint={t.keys.keyModal.expirationHint}>
               <Input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
             </Field>
             <label className="flex items-center gap-2 text-xs text-ink-300">
@@ -418,7 +423,7 @@ export function KeysClient({
                 onChange={(e) => setIsAdmin(e.target.checked)}
                 className="accent-[var(--color-warn)]"
               />
-              Clé administrateur (accès console, tous droits)
+              {t.keys.keyModal.adminKey}
             </label>
 
             {!isAdmin && (
@@ -429,27 +434,27 @@ export function KeysClient({
 
             <ErrorNote>{formError}</ErrorNote>
             <Button type="submit" variant="primary" disabled={!name} className="w-full">
-              Générer la clé
+              {t.keys.keyModal.submit}
             </Button>
           </form>
         </Modal>
       )}
 
       {modal === 'eab' && (
-        <Modal title="Nouvel identifiant EAB" onClose={closeModal}>
+        <Modal title={t.keys.eabModal.title} onClose={closeModal}>
           <form onSubmit={createEab} className="space-y-3">
-            <Field label="Nom" hint="ex. traefik-dokploy, caddy-nas">
+            <Field label={t.keys.eabModal.name} hint={t.keys.eabModal.nameHint}>
               <Input required autoFocus autoComplete="off" data-1p-ignore value={eabName} onChange={(e) => setEabName(e.target.value)} />
             </Field>
-            <Field label="Expiration" hint="vide = pas d’expiration ; passé cette date, les clients déjà enregistrés sont coupés aussi">
+            <Field label={t.keys.eabModal.expiration} hint={t.keys.eabModal.expirationHint}>
               <Input type="date" value={eabExpiresAt} onChange={(e) => setEabExpiresAt(e.target.value)} />
             </Field>
             <div className="border-t border-ink-800 pt-3">
-              <span className="mb-2 block text-[11px] uppercase tracking-wider text-ink-400">
-                Domaines autorisés
+              <span className="mb-2 block text-[11px] text-ink-400">
+                {t.keys.eabModal.allowedDomains}
               </span>
               {domains.length === 0 ? (
-                <p className="text-[11px] text-ink-600">Déclarez d&apos;abord un domaine.</p>
+                <p className="text-[11px] text-ink-600">{t.keys.grants.declareDomain}</p>
               ) : (
                 <div className="space-y-1.5">
                   {domains.map((d) => (
@@ -468,7 +473,7 @@ export function KeysClient({
                         className="accent-[var(--color-accent)]"
                       />
                       <span className="text-ink-100">{d.name}</span>
-                      <span className="text-ink-600">et ses sous-domaines</span>
+                      <span className="text-ink-600">{t.keys.eabModal.andSubdomains}</span>
                     </label>
                   ))}
                 </div>
@@ -481,7 +486,7 @@ export function KeysClient({
               disabled={!eabName || eabDomains.size === 0}
               className="w-full"
             >
-              Générer l&apos;identifiant
+              {t.keys.eabModal.submit}
             </Button>
           </form>
         </Modal>
@@ -501,8 +506,9 @@ function GrantEditor({
   toggle: (domainId: string, scope: string) => void;
   applyPreset: (domainId: string, scopes: string[]) => void;
 }) {
+  const t = useT();
   if (domains.length === 0) {
-    return <p className="text-[11px] text-ink-600">Déclarez d&apos;abord un domaine.</p>;
+    return <p className="text-[11px] text-ink-600">{t.keys.grants.declareDomain}</p>;
   }
   return (
     <div className="space-y-3">
@@ -511,15 +517,15 @@ function GrantEditor({
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="text-xs text-ink-100">{d.name}</span>
             <span className="ml-auto flex gap-1">
-              {Object.entries(PRESETS).map(([label, scopes]) => (
+              {PRESETS.map(({ key, scopes }) => (
                 <button
-                  key={label}
+                  key={key}
                   type="button"
-                  title={label}
-                  onClick={() => applyPreset(d.id, scopes)}
-                  className="rounded border border-ink-700 px-1.5 py-0.5 text-[10px] text-ink-400 hover:border-accent/50 hover:text-accent"
+                  title={t.keys.presets[key].title}
+                  onClick={() => applyPreset(d.id, [...scopes])}
+                  className="rounded border border-ink-700 px-1.5 py-0.5 text-[11px] text-ink-400 hover:border-accent/50 hover:text-accent"
                 >
-                  {label.split(' ')[0].toLowerCase()}
+                  {t.keys.presets[key].short}
                 </button>
               ))}
             </span>
@@ -534,7 +540,7 @@ function GrantEditor({
                   className="accent-[var(--color-accent)]"
                 />
                 <code className="text-ink-400">{scope}</code>
-                <span className="text-ink-600">{SCOPE_LABELS[scope]}</span>
+                <span className="text-ink-600">{t.keys.scopes[scope as keyof typeof t.keys.scopes] ?? scope}</span>
               </label>
             ))}
           </div>

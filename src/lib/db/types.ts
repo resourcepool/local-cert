@@ -13,6 +13,7 @@ export interface Database {
   users: UsersTable;
   api_keys: ApiKeysTable;
   domains: DomainsTable;
+  dns_providers: DnsProvidersTable;
   grants: GrantsTable;
   certificates: CertificatesTable;
   certificate_events: CertificateEventsTable;
@@ -132,12 +133,43 @@ export interface DomainsTable {
   /** apex or delegated base name, e.g. "home.example.com" */
   name: string;
   route53_zone_id: string;
-  /** optional AWS role to assume for this zone */
+  /** legacy per-domain role; unused once provider_id is set */
   aws_role_arn: string | null;
   aws_region: string;
   /** default TTL for records created under this domain */
   default_ttl: number;
   created_at: string;
+  /** DNS provider account holding the credentials; null = ambient AWS chain */
+  provider_id: string | null;
+  /**
+   * 'pending': registered before its rights were in place, the worker re-tests
+   * the zone; 'error': it gave up, an operator restarts the check. Only
+   * 'active' domains issue certificates or take records.
+   */
+  status: DomainStatus;
+  /** automatic checks done in the current cycle */
+  check_attempts: number;
+  /** when the worker tests again; null outside a cycle */
+  next_check_at: string | null;
+  checked_at: string | null;
+  /** what the last failing check reported */
+  check_error: string | null;
+}
+
+export type DomainStatus = 'active' | 'pending' | 'error';
+
+/** A named DNS provider account (one AWS account/identity, one row). */
+export interface DnsProvidersTable {
+  id: string;
+  name: string;
+  type: 'aws' | 'ovh' | 'gandi' | 'godaddy' | 'gcp';
+  /** JSON, shape depends on `type` — see AwsProviderConfig in lib/dns/providers */
+  config: string;
+  /** AES-256-GCM envelope of the provider secret; null = ambient credentials */
+  secret_enc: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface GrantsTable {

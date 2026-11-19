@@ -2,10 +2,12 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useT } from '@/lib/i18n/client';
 import { Button, ErrorNote, Field, Input, Panel, api } from '@/components/ui';
 
 export function LoginForm() {
   const router = useRouter();
+  const t = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -29,9 +31,9 @@ export function LoginForm() {
   }
 
   return (
-    <Panel title="Connexion">
+    <Panel title={t.auth.login.title}>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Email">
+        <Field label={t.auth.login.email}>
           <Input
             type="email"
             autoFocus
@@ -41,7 +43,7 @@ export function LoginForm() {
             onChange={(e) => setEmail(e.target.value)}
           />
         </Field>
-        <Field label="Mot de passe">
+        <Field label={t.auth.login.password}>
           <Input
             type="password"
             required
@@ -57,7 +59,7 @@ export function LoginForm() {
           disabled={busy || !email || !password}
           className="w-full"
         >
-          {busy ? 'Vérification…' : 'Se connecter'}
+          {busy ? t.auth.login.checking : t.auth.login.submit}
         </Button>
       </form>
     </Panel>

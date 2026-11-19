@@ -112,13 +112,12 @@ export function validatePassword(password: string, email?: string): string[] {
   return problems;
 }
 
-/** Human-readable summary, shown in the setup form. */
+/** Human-readable summary for API clients; the setup form words it in the reader's language. */
 export function describePolicy(): string {
   const p = passwordPolicy();
-  if (!p.enforced) return 'Aucune politique de mot de passe en environnement de développement.';
+  if (!p.enforced) return 'No password policy in the development environment.';
   return (
-    `${p.minLength} caractères minimum, combinant au moins ${p.requiredClasses} catégories ` +
-    'parmi minuscule, majuscule, chiffre et symbole. Les mots de passe courants et ceux ' +
-    "contenant l'adresse e-mail sont refusés."
+    `At least ${p.minLength} characters, combining at least ${p.requiredClasses} of: lowercase, ` +
+    'uppercase, digit, symbol. Common passwords and those containing the email address are rejected.'
   );
 }

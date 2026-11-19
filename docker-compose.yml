@@ -11,10 +11,15 @@ services:
       APP_ENV: ${APP_ENV:-production}
       ACME_ENV: ${ACME_ENV:-}
       ACME_EMAIL: ${ACME_EMAIL:?required}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
       TAG_RECORDS: ${TAG_RECORDS:-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      # Optional: a DNS provider declared in the environment. Copy the block
+      # with another label (PROVIDER_AWS_PROD_*) for each additional account;
+      # providers can also be created in the console instead.
+      PROVIDER_AWS_DEFAULT_NAME: ${PROVIDER_AWS_DEFAULT_NAME:-}
+      PROVIDER_AWS_DEFAULT_ACCESS_KEY_ID: ${PROVIDER_AWS_DEFAULT_ACCESS_KEY_ID:-}
+      PROVIDER_AWS_DEFAULT_SECRET_ACCESS_KEY: ${PROVIDER_AWS_DEFAULT_SECRET_ACCESS_KEY:-}
+      PROVIDER_AWS_DEFAULT_ROLE_ARN: ${PROVIDER_AWS_DEFAULT_ROLE_ARN:-}
+      PROVIDER_AWS_DEFAULT_REGION: ${PROVIDER_AWS_DEFAULT_REGION:-us-east-1}
       # Optional: provision the admin account without the /setup wizard.
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

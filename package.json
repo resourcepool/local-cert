@@ -11,10 +11,11 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx --conditions=react-server scripts/migrate.ts",
     "admin:reset": "tsx --conditions=react-server scripts/reset-admin.ts",
-    "aws:check": "tsx --conditions=react-server scripts/check-aws.ts",
+    "aws:check": "tsx --conditions=react-server --env-file-if-exists=.env scripts/check-aws.ts",
     "openapi:check": "tsx --conditions=react-server scripts/check-openapi.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-iam": "^3.1172.0",
     "@aws-sdk/client-route-53": "^3.1116.0",
     "@aws-sdk/client-sts": "^3.1116.0",
     "@node-rs/argon2": "^2.1.0",

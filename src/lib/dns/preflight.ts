@@ -56,7 +56,14 @@ function classify(err: unknown): { ok: boolean; note: string } {
     return { ok: true, note: 'authorized' };
   }
   if (/AccessDenied/i.test(name) || /not authorized/i.test(msg)) {
-    return { ok: false, note: 'AccessDenied' };
+    // AWS names who was refused and why; both are what tells a policy pasted
+    // on the wrong identity from one that has not propagated yet.
+    const who = /User: (\S+)/.exec(msg)?.[1]?.replace(/^arn:aws[\w-]*:(iam|sts)::\d+:/, '');
+    const why = /(because .+|with an explicit deny.+)$/.exec(msg)?.[1];
+    return {
+      ok: false,
+      note: ['AccessDenied', who && `as ${who}`, why].filter(Boolean).join(' — ').slice(0, 260),
+    };
   }
   return { ok: false, note: `${name || 'error'}: ${msg.slice(0, 160)}` };
 }

@@ -330,6 +330,52 @@ const STEPS: Step[] = [
         .execute();
     },
   },
+  {
+    id: '005_dns_providers',
+    up: async (k) => {
+      // Named DNS provider accounts. A domain used to carry its own AWS
+      // identity (region + optional role) on top of the process credentials;
+      // it now points at a provider that owns the credentials. provider_id
+      // stays nullable: domains registered before this step keep running on
+      // the ambient credential chain until they are re-attached.
+      await k.schema
+        .createTable('dns_providers')
+        .addColumn('id', TEXT, (c) => c.primaryKey())
+        .addColumn('name', TEXT, (c) => c.notNull().unique())
+        .addColumn('type', TEXT, (c) => c.notNull())
+        .addColumn('config', TEXT, (c) => c.notNull().defaultTo('{}'))
+        .addColumn('secret_enc', TEXT)
+        .addColumn('created_by', TEXT, (c) => c.notNull())
+        .addColumn('created_at', TEXT, (c) => c.notNull())
+        .addColumn('updated_at', TEXT, (c) => c.notNull())
+        .execute();
+
+      await k.schema
+        .alterTable('domains')
+        .addColumn('provider_id', TEXT, (c) => c.references('dns_providers.id'))
+        .execute();
+    },
+  },
+  {
+    id: '006_domain_status',
+    up: async (k) => {
+      // A domain can now be registered before its rights are in place. It is
+      // then 'pending' while the worker re-tests the zone, 'active' once the
+      // test passes, 'error' when it gave up. Existing domains are active.
+      // One ALTER per column: SQLite takes a single ADD COLUMN per statement.
+      await k.schema
+        .alterTable('domains')
+        .addColumn('status', TEXT, (c) => c.notNull().defaultTo('active'))
+        .execute();
+      await k.schema
+        .alterTable('domains')
+        .addColumn('check_attempts', 'integer', (c) => c.notNull().defaultTo(0))
+        .execute();
+      await k.schema.alterTable('domains').addColumn('next_check_at', TEXT).execute();
+      await k.schema.alterTable('domains').addColumn('checked_at', TEXT).execute();
+      await k.schema.alterTable('domains').addColumn('check_error', TEXT).execute();
+    },
+  },
 ];
 
 let migrated = false;

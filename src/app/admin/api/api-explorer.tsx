@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { Button, Panel } from '@/components/ui';
+import { useT } from '@/lib/i18n/client';
 
 /* Minimal structural typing over the spec — enough to drive the UI without
    dragging in an OpenAPI type package for a document we author ourselves. */
@@ -115,6 +116,7 @@ function typeLabel(raw: Schema | undefined, resolve?: Resolver): string {
 }
 
 export function ApiExplorer({ spec }: { spec: Record<string, unknown> }) {
+  const t = useT();
   const info = spec.info as { title: string; version: string; description?: string };
   const tags = (spec.tags ?? []) as Array<{ name: string; description?: string }>;
   const paths = (spec.paths ?? {}) as Record<string, PathItem>;
@@ -150,7 +152,7 @@ export function ApiExplorer({ spec }: { spec: Record<string, unknown> }) {
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="filtrer : certificats, dns, subdomain…"
+            placeholder={t.api.filterPlaceholder}
             className="min-w-56 flex-1 rounded border border-ink-700 bg-ink-950 px-2.5 py-1.5 text-ink-100 outline-none placeholder:text-ink-600 focus:border-accent/60"
           />
           <a
@@ -163,8 +165,7 @@ export function ApiExplorer({ spec }: { spec: Record<string, unknown> }) {
           </a>
         </div>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-600">
-          « Envoyer » exécute la requête depuis ce navigateur avec votre cookie de session — les
-          appels partent réellement, y compris ceux qui écrivent.
+          {t.api.sendNote}
         </p>
       </Panel>
 
@@ -191,7 +192,7 @@ export function ApiExplorer({ spec }: { spec: Record<string, unknown> }) {
                       className="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left"
                     >
                       <span
-                        className={`w-16 shrink-0 rounded border px-1.5 py-0.5 text-center text-[10px] uppercase ${METHOD_STYLE[o.method]}`}
+                        className={`w-16 shrink-0 rounded border px-1.5 py-0.5 text-center text-[11px] ${METHOD_STYLE[o.method]}`}
                       >
                         {o.method}
                       </span>
@@ -223,6 +224,7 @@ function OperationPanel({
   shared: Param[];
   resolve: Resolver;
 }) {
+  const t = useT();
   const params = [...shared, ...(op.parameters ?? [])];
   const bodySchema = op.requestBody?.content?.['application/json']?.schema;
 
@@ -304,14 +306,14 @@ function OperationPanel({
 
       {params.length > 0 && (
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-wider text-ink-400">Paramètres</p>
+          <p className="text-[11px] text-ink-400">{t.api.parameters}</p>
           {params.map((p) => (
             <label key={`${p.in}-${p.name}`} className="block">
               <span className="mb-1 flex flex-wrap items-baseline gap-1.5 text-[11px]">
                 <code className="text-ink-100">{p.name}</code>
                 <span className="text-ink-600">
                   {p.in}
-                  {p.required ? ' · requis' : ''}
+                  {p.required ? ` · ${t.api.requiredTag}` : ''}
                   {typeLabel(p.schema, resolve) ? ` · ${typeLabel(p.schema, resolve)}` : ''}
                 </span>
                 {p.description && <span className="text-ink-400">{p.description}</span>}
@@ -329,8 +331,8 @@ function OperationPanel({
 
       {bodySchema && method !== 'get' && (
         <div>
-          <p className="mb-1 text-[10px] uppercase tracking-wider text-ink-400">
-            Corps {op.requestBody?.required ? '· requis' : '· optionnel'}
+          <p className="mb-1 text-[11px] text-ink-400">
+            {t.api.body} {op.requestBody?.required ? `· ${t.api.requiredTag}` : `· ${t.api.optionalTag}`}
           </p>
           <textarea
             value={body}
@@ -344,13 +346,13 @@ function OperationPanel({
 
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" onClick={send} disabled={busy}>
-          {busy ? 'Envoi…' : 'Envoyer'}
+          {busy ? t.api.sending : t.api.send}
         </Button>
         <code className="truncate text-[11px] text-ink-600">{buildUrl()}</code>
       </div>
 
       <details className="text-[11px]">
-        <summary className="cursor-pointer text-ink-400 hover:text-ink-100">équivalent curl</summary>
+        <summary className="cursor-pointer text-ink-400 hover:text-ink-100">{t.api.curlEquivalent}</summary>
         <pre className="mt-1 overflow-x-auto rounded border border-ink-800 bg-ink-950 p-2 text-ink-300">
           {curl()}
         </pre>
@@ -375,7 +377,7 @@ function OperationPanel({
             <span className="text-ink-600">{result.ms} ms</span>
           </p>
           <pre className="max-h-80 overflow-auto rounded border border-ink-800 bg-ink-950 p-2 text-[11px] leading-relaxed text-ink-300">
-            {result.text || '(corps vide)'}
+            {result.text || t.api.emptyBody}
           </pre>
         </div>
       )}

@@ -2,20 +2,15 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getAdminSession } from '@/lib/auth/guard';
 import { ensureReady, isSetupComplete } from '@/lib/auth/setup';
-import { DIALECT } from '@/lib/db';
 import { acmeEnv } from '@/lib/acme/client';
-import { appEnv } from '@/lib/env';
-import { SignOut } from './sign-out';
+import { Logo } from '@/components/logo';
+import { ThemeToggle } from '@/components/theme-toggle';
+import { Footer } from '@/components/footer';
+import { getMessages } from '@/lib/i18n/server';
+import { NavLinks } from './nav-links';
+import { SettingsMenu } from './settings-menu';
 
 export const dynamic = 'force-dynamic';
-
-const NAV = [
-  { href: '/admin', label: 'Vue d’ensemble' },
-  { href: '/admin/certificates', label: 'Certificats' },
-  { href: '/admin/domains', label: 'Domaines' },
-  { href: '/admin/keys', label: 'Clés & droits' },
-  { href: '/admin/api', label: 'API' },
-];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   await ensureReady();
@@ -24,48 +19,41 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!session) redirect('/login');
 
   const env = acmeEnv();
+  const t = (await getMessages()).shell;
+  const nav = [
+    { href: '/admin', label: t.nav.overview },
+    { href: '/admin/certificates', label: t.nav.certificates },
+    { href: '/admin/domains', label: t.nav.domains },
+  ];
+
+  const chip = 'rounded-md border px-1.5 py-0.5 text-[11px]';
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-5">
-      <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-ink-700 py-4">
-        <Link href="/admin" className="text-sm tracking-tight">
-          local<span className="text-accent">-</span>cert
-        </Link>
-        <nav className="flex flex-wrap gap-4 text-xs">
-          {NAV.map((item) => (
-            <Link key={item.href} href={item.href} className="text-ink-400 transition-colors hover:text-ink-100">
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-        <div className="ml-auto flex items-center gap-3 text-[10px] uppercase tracking-wider">
-          <span
-            className={`rounded border px-1.5 py-0.5 ${
-              env === 'production'
-                ? 'border-accent/40 bg-accent/10 text-accent'
-                : 'border-warn/40 bg-warn/10 text-warn'
-            }`}
-          >
-            acme:{env}
-          </span>
-          <span
-            className={`rounded border px-1.5 py-0.5 ${
-              appEnv() === 'production'
-                ? 'border-accent/40 bg-accent/10 text-accent'
-                : 'border-ink-600 text-ink-400'
-            }`}
-          >
-            env:{appEnv()}
-          </span>
-          <span className="rounded border border-ink-600 px-1.5 py-0.5 text-ink-400">db:{DIALECT}</span>
-          <span className="text-ink-400 normal-case tracking-normal">{session.name}</span>
-          <SignOut />
+    <div className="flex min-h-screen flex-col">
+      <header className="sticky top-0 z-40 border-b border-ink-700 bg-ink-950/85 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-5 py-2.5">
+          <Link href="/admin" aria-label={t.homeLabel} className="text-[15px]">
+            <Logo />
+          </Link>
+          <NavLinks items={nav} />
+          <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
+            <span
+              title={t.acmeChipTitle}
+              className={`${chip} ${
+                env === 'production'
+                  ? 'border-accent/40 bg-accent/10 text-accent'
+                  : 'border-warn/40 bg-warn/10 text-warn'
+              }`}
+            >
+              ACME {env}
+            </span>
+            <ThemeToggle />
+            <SettingsMenu user={session.name} />
+          </div>
         </div>
       </header>
-      <main className="flex-1 py-6">{children}</main>
-      <footer className="border-t border-ink-700 py-4 text-[11px] text-ink-600">
-        API : <code>/api/v1</code> · santé : <code>/api/healthz</code>
-      </footer>
+      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-7">{children}</main>
+      <Footer />
     </div>
   );
 }

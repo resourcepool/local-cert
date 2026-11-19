@@ -1,5 +1,6 @@
 import 'server-only';
-import { deleteRecord } from './route53';
+import { deleteRecord } from './zone';
+import { zoneFor } from './providers';
 import { logEvent } from '@/lib/acme/issue';
 import type { CertificatesTable, DomainsTable } from '@/lib/db/types';
 
@@ -16,7 +17,8 @@ import type { CertificatesTable, DomainsTable } from '@/lib/db/types';
  */
 export async function cleanupCertificateRecords(
   cert: Pick<CertificatesTable, 'id' | 'domains' | 'dns_record'>,
-  domain: Pick<DomainsTable, 'route53_zone_id' | 'aws_region' | 'aws_role_arn' | 'default_ttl'>,
+  domain: Pick<DomainsTable, 'route53_zone_id' | 'aws_region' | 'aws_role_arn' | 'provider_id' | 'default_ttl'
+  >,
 ): Promise<string[]> {
   const dnsRecord = cert.dns_record ? JSON.parse(cert.dns_record) : null;
   if (!dnsRecord?.create_record || !dnsRecord.target_ip) return [];
@@ -27,11 +29,7 @@ export async function cleanupCertificateRecords(
 
   try {
     await deleteRecord(
-      {
-        zoneId: domain.route53_zone_id,
-        region: domain.aws_region,
-        roleArn: domain.aws_role_arn,
-      },
+      await zoneFor(domain),
       target,
       'A',
       [dnsRecord.target_ip],

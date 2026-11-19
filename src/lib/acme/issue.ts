@@ -10,7 +10,8 @@ import {
   waitForSync,
   waitForTxtPropagation,
   type ZoneConfig,
-} from '@/lib/dns/route53';
+} from '@/lib/dns/zone';
+import { zoneFor } from '@/lib/dns/providers';
 
 export async function logEvent(
   certId: string,
@@ -64,11 +65,7 @@ export async function runIssuance(certId: string): Promise<void> {
     .where('id', '=', cert.domain_id)
     .executeTakeFirstOrThrow();
 
-  const zone: ZoneConfig = {
-    zoneId: domain.route53_zone_id,
-    region: domain.aws_region,
-    roleArn: domain.aws_role_arn,
-  };
+  const zone: ZoneConfig = await zoneFor(domain);
 
   const names: string[] = JSON.parse(cert.domains);
   const created: Array<{ name: string; value: string }> = [];
@@ -224,11 +221,7 @@ export async function validateExternalOrder(certId: string): Promise<string> {
     .selectAll()
     .where('id', '=', cert.domain_id)
     .executeTakeFirstOrThrow();
-  const zone: ZoneConfig = {
-    zoneId: domain.route53_zone_id,
-    region: domain.aws_region,
-    roleArn: domain.aws_role_arn,
-  };
+  const zone: ZoneConfig = await zoneFor(domain);
   const names: string[] = JSON.parse(cert.domains);
 
   try {

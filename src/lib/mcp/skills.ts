@@ -190,10 +190,12 @@ console. Every change is written to the audit log with the calling key as actor;
 
 ## Onboarding a domain
 
-1. \`admin_create_domain\` with the base name and its Route53 hosted zone id. It
-   verifies the zone serves the name and that the instance's AWS credentials can
-   read and write it. On a permission failure the error \`detail.checks\` shows
-   which Route53 action is missing — fix the IAM policy rather than using
+1. \`admin_list_providers\` to pick the DNS provider (the AWS account) hosting
+   the zone, then \`admin_create_domain\` with its \`provider_id\`, the base name
+   and the Route53 hosted zone id. It verifies the zone serves the name and that
+   the provider's credentials can read and write it. On a permission failure the error \`detail.checks\` shows
+   which Route53 action is missing — have an operator paste the policy the console
+   generates (Domaines → ajouter un domaine) rather than using
    \`force\`, which registers a domain that cannot issue.
 2. \`admin_create_api_key\` with a grant on the new domain for whoever will use it.
 

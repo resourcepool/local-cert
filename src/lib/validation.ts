@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { DOMAIN_SCOPES } from './scopes';
+import { PROVIDER_TYPES } from '@/lib/dns/provider-types';
 
 /** Certificate subjects: real hostnames only, optional leading wildcard. */
 const HOSTNAME = /^(?=.{1,253}$)(\*\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
@@ -108,11 +109,112 @@ export const createDomainSchema = z.object({
     .trim()
     .min(1)
     .transform((v) => v.replace(/^\/hostedzone\//, ''))
-    .meta({ example: 'Z0123456ABCDEFGHIJK' }),
+    .meta({
+      example: 'Z0123456ABCDEFGHIJK',
+      description:
+        'Zone identifier at the DNS host: the hosted zone id for Route53, the managed zone name for Google Cloud DNS, the domain name for OVHcloud, Gandi and GoDaddy. The field keeps its historical name.',
+    }),
   aws_region: z.string().trim().default('us-east-1'),
   aws_role_arn: z.string().trim().startsWith('arn:aws:iam::').nullish(),
   default_ttl: z.number().int().min(30).max(86400).default(60),
+  provider_id: z
+    .string()
+    .min(1)
+    .nullish()
+    .meta({
+      description:
+        'DNS provider holding the credentials for this zone. When set, aws_region and aws_role_arn come from the provider. Omitted: the ambient AWS credential chain is used.',
+    }),
 });
+
+const awsAccessKeyId = z
+  .string()
+  .trim()
+  .regex(/^[A-Z0-9]{16,128}$/, 'Not an AWS access key id');
+const awsRoleArn = z
+  .string()
+  .trim()
+  .regex(/^arn:aws[a-z-]*:iam::\d{12}:role\/[\w+=,.@/-]+$/, 'Not an IAM role ARN');
+const providerName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(60)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9 ._()-]*$/, 'Letters, digits, spaces and . _ - ( ) only')
+  .meta({ example: 'aws-prod' });
+
+/**
+ * Fields of a non-AWS host (OVH, Gandi, GoDaddy, Google Cloud), keyed as in
+ * lib/dns/provider-types.ts; checked against that registry by the service.
+ */
+const remoteSettings = z
+  .record(z.string(), z.string())
+  .optional()
+  .meta({
+    description:
+      'Non-AWS providers: their credential fields, e.g. {"token": "…"} for Gandi or {"endpoint": "ovh-eu", "application_key": "…", "application_secret": "…", "consumer_key": "…"} for OVH. Secret fields are stored encrypted and never returned.',
+  });
+
+const awsCredentialFields = {
+  access_key_id: awsAccessKeyId.nullish().meta({
+    description: 'IAM user access key. Omit both key fields to use the ambient credential chain.',
+  }),
+  secret_access_key: z.string().trim().min(1).nullish(),
+  role_arn: awsRoleArn.nullish().meta({
+    description: 'Role assumed for every Route53 call. Omitted: the IAM user is used directly.',
+  }),
+};
+
+const keyPairComplete = (v: { access_key_id?: string | null; secret_access_key?: string | null }) =>
+  Boolean(v.access_key_id) === Boolean(v.secret_access_key);
+const keyPairMessage = {
+  message: 'access_key_id and secret_access_key go together',
+  path: ['secret_access_key'],
+};
+
+export const createProviderSchema = z
+  .object({
+    name: providerName,
+    type: z.enum(PROVIDER_TYPES).default('aws'),
+    ...awsCredentialFields,
+    settings: remoteSettings,
+    region: z.string().trim().min(1).default('us-east-1'),
+    draft: z.boolean().default(false).meta({
+      description:
+        'Store an unfinished provider: only the key pair has to be valid. Domains cannot use it until it is finalised with PATCH draft=false.',
+    }),
+  })
+  .refine(keyPairComplete, keyPairMessage);
+
+/** Absent field = unchanged. role_arn: null drops the role. */
+export const updateProviderSchema = z
+  .object({
+    name: providerName.optional(),
+    access_key_id: awsAccessKeyId.optional(),
+    secret_access_key: z.string().trim().min(1).optional(),
+    role_arn: awsRoleArn.nullable().optional(),
+    region: z.string().trim().min(1).optional(),
+    settings: remoteSettings,
+    draft: z.literal(false).optional().meta({
+      description: 'Finalises a draft. Refused while the connection test fails, unless force=true.',
+    }),
+  })
+  .refine(keyPairComplete, keyPairMessage);
+
+/**
+ * Tests credentials without storing them. With provider_id and no key pair,
+ * the stored key pair is used — that is how a new role ARN is tried against
+ * an existing provider.
+ */
+export const probeProviderSchema = z
+  .object({
+    provider_id: z.string().min(1).nullish(),
+    type: z.enum(PROVIDER_TYPES).optional(),
+    ...awsCredentialFields,
+    settings: remoteSettings,
+    region: z.string().trim().min(1).default('us-east-1'),
+  })
+  .refine(keyPairComplete, keyPairMessage);
 
 const scopeEnum = z.enum(DOMAIN_SCOPES as [string, ...string[]]);
 

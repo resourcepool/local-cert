@@ -62,11 +62,19 @@ npx tsx scripts/reset-admin.ts admin@example.com <nouveau-mot-de-passe>
 
 ### Ensuite
 
-1. **Domaines** — déclarer la zone Route53 (`home.example.com` + `Z0123…`).
-   Les permissions sont vérifiées **avant** l'enregistrement : les cinq appels
-   Route53 nécessaires sont sondés, et le domaine n'est créé que s'ils passent.
-2. **Clés & droits** — créer une clé par hôte, cocher les scopes par domaine.
-3. **Certificats** — émettre, suivre les logs en direct, télécharger le `.pem`.
+1. **Providers** — déclarer le compte AWS qui héberge vos zones : une paire de
+   clés IAM et, de préférence, un rôle. L'assistant génère la politique de
+   confiance et la politique de droits à coller dans IAM, puis teste.
+2. **Domaines** — choisir un provider, puis une de ses zones. La console génère
+   la politique IAM qui inclut cette zone et sonde les cinq appels Route53
+   nécessaires : le domaine n'est ajouté que s'ils passent.
+3. **Clés & droits** — créer une clé d'API par hôte, ou un identifiant EAB par
+   client ACME.
+4. **Certificats** — émettre, suivre les logs en direct, télécharger le `.pem`.
+
+La page **Docs** de la console reprend tout cela pas à pas, avec un guide par
+reverse proxy et par plateforme (Traefik, Caddy, Nginx, Kubernetes, Dokploy,
+Synology…), aux URLs de votre instance.
 
 > Restez sur `ACME_ENV=staging` tant que le flux n'est pas validé. La
 > production Let's Encrypt limite à **50 certificats par domaine enregistré et
@@ -235,7 +243,13 @@ POST   /api/mcp                      serveur MCP pour agents IA (voir plus bas)
 ### Administration (session console)
 ```
 POST|GET|DELETE  /api/admin/session   email+mot de passe / whoami / logout
+GET|POST         /api/admin/providers            ?force=true pour enregistrer malgré un test en échec
+POST             /api/admin/providers/probe      teste des credentials sans les stocker
+PATCH|DELETE     /api/admin/providers/{id}
+GET              /api/admin/providers/{id}/zones   zones hébergées visibles
+GET              /api/admin/providers/{id}/policy  politique IAM complète (?zone_id= à ajouter)
 GET|POST         /api/admin/domains
+POST             /api/admin/domains/preflight    les contrôles d'un ajout, sans rien écrire
 DELETE           /api/admin/domains/{id}   ?force=true pour supprimer avec ses certificats
 GET|POST         /api/admin/keys
 PATCH|DELETE     /api/admin/keys/{id}
@@ -446,6 +460,7 @@ claude mcp add --transport http local-cert http://localhost:3000/api/mcp \
 | `delete_dns_record` | `DELETE /api/v1/dns/records` | `dns:write` |
 | `get_acme_account` | `GET /api/v1/acme/account` | clé valide |
 | `admin_get_stats` | `GET /api/admin/stats` | clé admin |
+| `admin_list_providers` | `GET /api/admin/providers` | clé admin |
 | `admin_list_domains` / `admin_create_domain` / `admin_delete_domain` | `/api/admin/domains` | clé admin |
 | `admin_list_api_keys` / `admin_create_api_key` / `admin_update_api_key` / `admin_delete_api_key` | `/api/admin/keys` | clé admin |
 
@@ -728,6 +743,70 @@ aws route53 change-tags-for-resource --resource-type hostedzone \
 
 ---
 
+## Providers DNS
+
+Un **provider** est un compte chez un hébergeur DNS, avec les identifiants qui
+permettent d'y écrire. Chaque domaine pointe sur un provider ; plusieurs
+providers du même hébergeur sont le cas normal (`aws-prod`, `aws-lab`…).
+
+| Hébergeur | Service | Identifiants | TTL min. |
+| --- | --- | --- | --- |
+| AWS | Route53 | clé IAM, rôle conseillé | 30 s |
+| OVHcloud | zones DNS | application key, application secret, consumer key | 60 s |
+| Gandi | LiveDNS | Personal Access Token | 300 s |
+| GoDaddy | DNS | clé d'API de production + secret | 600 s |
+| Google Cloud | Cloud DNS | clé JSON d'un compte de service | 1 s |
+
+Hors AWS, les droits sont portés par les identifiants : rien à modifier chez
+l'hébergeur quand on ajoute un domaine, et le test des droits crée puis supprime
+un enregistrement TXT temporaire (Route53, lui, se teste sans écrire). GoDaddy
+réserve son API DNS aux comptes d'au moins dix domaines. Ces quatre intégrations
+suivent les API publiques des hébergeurs ; voir **Docs → Providers DNS** pour le
+pas à pas de chacune.
+
+Pour AWS, le modèle recommandé est le suivant.
+
+
+| Objet | Rôle |
+| --- | --- |
+| Utilisateur IAM | l'identité de local-cert : une paire de clés, aucun droit |
+| Rôle IAM | ce que local-cert peut faire ; seule cette clé peut l'assumer |
+| Politique inline du rôle | les zones autorisées, générée par la console |
+
+La clé est stockée chiffrée (`MASTER_KEY`, AES-256-GCM) et n'est jamais
+renvoyée. Ajouter une zone revient à recoller la politique du rôle, que la
+console régénère **en entier** (zones déjà déclarées + la nouvelle) : la clé ne
+change jamais. Variantes : sans rôle (politique sur l'utilisateur), ou sans clé
+(credentials du processus : variables d'environnement, IRSA, rôle d'instance).
+
+Un provider peut aussi être **déclaré par variables d'environnement**, quand
+ses credentials doivent venir du déploiement plutôt que de la base. Tout est
+facultatif, et le bloc se répète avec un autre libellé pour chaque compte :
+
+```bash
+PROVIDER_AWS_DEFAULT_NAME="Default AWS"          # seule variable obligatoire du bloc
+PROVIDER_AWS_DEFAULT_ACCESS_KEY_ID=AKIA…         # sans la paire : credentials du processus
+PROVIDER_AWS_DEFAULT_SECRET_ACCESS_KEY=…
+PROVIDER_AWS_DEFAULT_ROLE_ARN=arn:aws:iam::…     # facultatif
+PROVIDER_AWS_DEFAULT_REGION=us-east-1            # facultatif
+
+PROVIDER_AWS_PROD_NAME="aws-prod"                # second compte
+
+PROVIDER_GANDI_MAIN_NAME="gandi"                 # autres hébergeurs : même schéma,
+PROVIDER_GANDI_MAIN_TOKEN=…                      # PROVIDER_<OVH|GANDI|GODADDY|GCP>_<LIBELLÉ>_<CHAMP>
+```
+
+La liste des champs par hébergeur est dans `.env.example`.
+
+Ces providers apparaissent dans la console marqués « environnement » : on peut
+les tester et générer leur politique, pas les modifier ni les retirer (l'API
+répond `403`). Leur secret n'est jamais écrit en base. Le libellé `DEFAULT` a
+une particularité : les domaines déclarés avant l'arrivée des providers y sont
+rattachés au démarrage. Retirer un bloc rend le provider à la console, sans
+clé, jusqu'à ce qu'on lui en redonne une.
+
+Le guide complet est dans la console, **Docs → Provider AWS**.
+
 ## IAM Route53
 
 Politique au plus juste — l'application n'a besoin d'écrire que des TXT
@@ -785,7 +864,8 @@ suite.
 Les mêmes contrôles en ligne de commande :
 
 ```bash
-npm run aws:check -- Z0123456ABCDEFGHIJK
+npm run aws:check -- Z0123456ABCDEFGHIJK          # provider PROVIDER_AWS_DEFAULT_*
+npm run aws:check -- Z0123456ABCDEFGHIJK PROD     # un autre provider déclaré
 ```
 
 Sonde les cinq appels que le code effectue réellement et dit lesquels

@@ -1,6 +1,7 @@
 import 'server-only';
 import { db, nowIso } from '@/lib/db';
 import { migrate } from '@/lib/db/migrate';
+import { syncEnvProviders } from '@/lib/dns/env-providers';
 import { mintKey, adoptKey, type MintedKey } from './apikey';
 import { hashPassword } from '@/lib/crypto/password';
 import { validatePassword } from '@/lib/env';
@@ -23,6 +24,7 @@ export async function ensureReady(): Promise<void> {
 
 async function init(): Promise<void> {
   await migrate();
+  await syncEnvProviders();
   if (await isSetupComplete()) return;
 
   const email = process.env.ADMIN_EMAIL?.trim();

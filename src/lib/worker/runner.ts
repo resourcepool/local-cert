@@ -3,6 +3,7 @@ import { sql } from 'kysely';
 import { db, nowIso } from '@/lib/db';
 import { runIssuance, logEvent, notify } from '@/lib/acme/issue';
 import { expireAbandonedOrders } from '@/lib/acme-server/service';
+import { sweepPendingDomains } from '@/lib/admin/domains';
 
 /**
  * Single-process job runner. Orders are claimed with a conditional UPDATE on
@@ -16,6 +17,8 @@ const LOCK_TIMEOUT_MS = 30 * 60_000;
 const MAX_CONCURRENT = Number(process.env.WORKER_CONCURRENCY ?? 2);
 const RENEW_SWEEP_MS = Number(process.env.RENEW_SWEEP_MS ?? 6 * 3600_000);
 
+const DOMAIN_CHECK_POLL_MS = 10_000;
+
 let started = false;
 const inflight = new Set<string>();
 
@@ -26,6 +29,9 @@ export function startWorker(): void {
 
   void loop(tick, POLL_MS);
   void loop(renewalSweep, RENEW_SWEEP_MS);
+  // Pending domains are due once a minute each; looking more often only keeps
+  // the delay after a due time short.
+  void loop(sweepPendingDomains, DOMAIN_CHECK_POLL_MS);
 }
 
 async function loop(fn: () => Promise<void>, intervalMs: number): Promise<void> {

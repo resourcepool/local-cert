@@ -1,0 +1,35 @@
+import type { docsNav as en } from '../en/docsNav';
+
+export const docsNav: typeof en = {
+  sections: {
+    start: "Começar",
+    providers: "Fornecedores de DNS",
+    acme: "Servidor ACME",
+    proxies: "Reverse proxies",
+    platforms: "Plataformas",
+  },
+  entries: {
+    "": { title: "Início rápido", summary: "Do fornecedor ao primeiro certificado." },
+    "domains": { title: "Adicionar um domínio", summary: "Escolher a zona, conceder as permissões, testar." },
+    "providers": { title: "Visão geral", summary: "Serviços suportados, princípio, variáveis de ambiente." },
+    "providers/aws": { title: "AWS Route53", summary: "Utilizador IAM, função, políticas, várias contas." },
+    "providers/ovh": { title: "OVHcloud", summary: "Token de API limitado ao DNS." },
+    "providers/gandi": { title: "Gandi", summary: "Personal Access Token LiveDNS." },
+    "providers/godaddy": { title: "GoDaddy", summary: "Chave de API de produção." },
+    "providers/gcp": { title: "Google Cloud", summary: "Conta de serviço Cloud DNS." },
+    "acme": { title: "Princípio e credenciais EAB", summary: "O que é, como se emite um certificado, para que serve o EAB." },
+    "acme/clients": { title: "certbot, acme.sh, lego", summary: "Os clientes de linha de comandos, base da maioria das integrações." },
+    "acme/traefik": { title: "Traefik", summary: "Resolver ACME nativo com EAB." },
+    "acme/caddy": { title: "Caddy", summary: "Opções globais ou por site." },
+    "acme/nginx": { title: "Nginx", summary: "Com certbot ou acme.sh." },
+    "acme/apache": { title: "Apache httpd", summary: "mod_md." },
+    "acme/haproxy": { title: "HAProxy", summary: "acme.sh e o seu hook de implementação." },
+    "acme/nginx-proxy-manager": { title: "Nginx Proxy Manager", summary: "Sem CA personalizada: certificado importado." },
+    "acme/kubernetes": { title: "Kubernetes", summary: "cert-manager, ClusterIssuer ACME." },
+    "acme/dokploy": { title: "Dokploy", summary: "Resolver Traefik adicional." },
+    "acme/coolify": { title: "Coolify", summary: "Configuração do proxy Traefik." },
+    "acme/synology": { title: "Synology DSM", summary: "acme.sh e o hook synology_dsm." },
+    "acme/proxmox": { title: "Proxmox VE", summary: "pvenode acme, conta personalizada." },
+    "acme/others": { title: "Outros sistemas", summary: "OPNsense, pfSense, TrueNAS, e tudo o que não fala ACME." },
+  },
+};

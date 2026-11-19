@@ -26,14 +26,14 @@ export const DOMAIN_SCOPES: Scope[] = [
 ];
 
 export const SCOPE_LABELS: Record<string, string> = {
-  'cert:read': 'Lire les certificats',
-  'cert:issue': 'Émettre un certificat',
-  'cert:renew': 'Renouveler',
-  'cert:revoke': 'Révoquer / supprimer',
-  'cert:export': 'Exporter la clé privée',
-  'dns:read': 'Lire les enregistrements DNS',
-  'dns:write': 'Écrire les enregistrements DNS',
-  'admin:*': 'Administrateur (tout)',
+  'cert:read': 'Read certificates',
+  'cert:issue': 'Issue a certificate',
+  'cert:renew': 'Renew',
+  'cert:revoke': 'Revoke / delete',
+  'cert:export': 'Export the private key',
+  'dns:read': 'Read DNS records',
+  'dns:write': 'Write DNS records',
+  'admin:*': 'Administrator (everything)',
 };
 
 export function parseScopes(json: string): Scope[] {

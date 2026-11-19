@@ -4,7 +4,8 @@ import { requireAuth, requireScope } from '@/lib/auth/guard';
 import { SCOPES } from '@/lib/scopes';
 import { fqdnSchema } from '@/lib/validation';
 import { domainForFqdn, serializeCert } from '@/lib/certificates';
-import { listRecords } from '@/lib/dns/route53';
+import { listRecords } from '@/lib/dns/zone';
+import { zoneFor } from '@/lib/dns/providers';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,11 +49,7 @@ export const GET = handler(async (req: Request, ctx: { params: Promise<{ fqdn: s
     error?: string;
   };
   try {
-    const all = await listRecords({
-      zoneId: domain.route53_zone_id,
-      region: domain.aws_region,
-      roleArn: domain.aws_role_arn,
-    });
+    const all = await listRecords(await zoneFor(domain));
     const matching = all.filter((r) => r.name === fqdn && !r.marker);
     dns = {
       exists: matching.length > 0,

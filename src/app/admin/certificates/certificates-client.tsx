@@ -2,7 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Button, ErrorNote, Field, Input, Panel, Select, StatusBadge, api } from '@/components/ui';
+import { Button, ConfirmDialog, ErrorNote, Field, Input, Panel, Select, StatusBadge, api } from '@/components/ui';
+import { useT } from '@/lib/i18n/client';
+import { fmt, rich } from '@/lib/i18n/format';
 
 type Cert = {
   id: string;
@@ -29,9 +31,13 @@ export function CertificatesClient({
   domains: DomainRef[];
 }) {
   const router = useRouter();
+  const t = useT().certificates;
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [openLog, setOpenLog] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<{ id: string; names: string; status: string } | null>(
+    null,
+  );
   const [form, setForm] = useState({
     host: '',
     domain: domains[0]?.name ?? '',
@@ -89,6 +95,31 @@ export function CertificatesClient({
 
   return (
     <div className="space-y-5">
+      {removing && (
+        <ConfirmDialog
+          title={t.removeDialog.title}
+          confirmLabel={t.removeDialog.confirm}
+          onClose={() => setRemoving(null)}
+          onConfirm={async () => {
+            const res = await api<{ warnings?: string[] }>(
+              `/api/v1/certificates/${removing.id}?purge=true`,
+              { method: 'DELETE' },
+            );
+            setError(null);
+            setWarnings(res.warnings ?? []);
+            setRemoving(null);
+            router.refresh();
+          }}
+        >
+          <p>
+            {rich(t.removeDialog.question, {
+              b: (c) => <b className="text-ink-100">{c}</b>,
+              names: removing.names,
+            })}
+          </p>
+          <p>{removing.status === 'issued' ? t.removeDialog.bodyIssued : t.removeDialog.bodyOther}</p>
+        </ConfirmDialog>
+      )}
       <ErrorNote>{error}</ErrorNote>
       {warnings.map((w) => (
         <p
@@ -100,11 +131,10 @@ export function CertificatesClient({
       ))}
 
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
-        <Panel title={`Certificats (${certificates.length})`}>
+        <Panel title={fmt(t.list.title, { count: certificates.length })}>
           {certificates.length === 0 ? (
             <p className="py-6 text-center text-xs text-ink-400">
-              Aucun certificat émis. Utilisez le formulaire à droite ou{' '}
-              <code>POST /api/v1/certificates</code>.
+              {rich(t.list.empty, { code: <code>POST /api/v1/certificates</code> })}
             </p>
           ) : (
             <div className="space-y-2">
@@ -124,14 +154,14 @@ export function CertificatesClient({
                               : 'text-ink-400'
                         }`}
                       >
-                        {c.days_remaining} j restants
+                        {fmt(t.list.daysLeft, { count: c.days_remaining })}
                       </span>
                     )}
-                    {c.auto_renew && <span className="text-[11px] text-ink-600">auto-renew</span>}
+                    {c.auto_renew && <span className="text-[11px] text-ink-600">{t.list.autoRenew}</span>}
 
                     <div className="ml-auto flex flex-wrap gap-1.5">
                       <Button variant="ghost" onClick={() => setOpenLog(openLog === c.id ? null : c.id)}>
-                        {openLog === c.id ? 'fermer' : 'logs'}
+                        {openLog === c.id ? t.list.close : t.list.logs}
                       </Button>
                       {c.status === 'issued' && (
                         <a
@@ -141,9 +171,14 @@ export function CertificatesClient({
                           .pem
                         </a>
                       )}
-                      <Button onClick={() => act(c.id, '/renew', 'POST')}>renouveler</Button>
-                      <Button variant="danger" onClick={() => act(c.id, '?purge=true', 'DELETE')}>
-                        supprimer
+                      <Button onClick={() => act(c.id, '/renew', 'POST')}>{t.list.renew}</Button>
+                      <Button
+                        variant="danger"
+                        onClick={() =>
+                          setRemoving({ id: c.id, names: c.domains.join(', '), status: c.status })
+                        }
+                      >
+                        {t.list.delete}
                       </Button>
                     </div>
                   </div>
@@ -161,12 +196,12 @@ export function CertificatesClient({
           )}
         </Panel>
 
-        <Panel title="Émettre un certificat">
+        <Panel title={t.form.title}>
           {domains.length === 0 ? (
-            <p className="text-xs text-ink-400">Déclarez d&apos;abord un domaine.</p>
+            <p className="text-xs text-ink-400">{t.form.needDomain}</p>
           ) : (
             <form onSubmit={create} className="space-y-3">
-              <Field label="Domaine géré">
+              <Field label={t.form.managedDomain}>
                 <Select value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })}>
                   {domains.map((d) => (
                     <option key={d.id} value={d.name}>
@@ -183,11 +218,11 @@ export function CertificatesClient({
                   onChange={(e) => setForm({ ...form, wildcard: e.target.checked })}
                   className="accent-[var(--color-accent)]"
                 />
-                Wildcard <code className="text-ink-600">*.{form.domain}</code>
+                {rich(t.form.wildcard, { pattern: <code className="text-ink-600">*.{form.domain}</code> })}
               </label>
 
               {!form.wildcard && (
-                <Field label="Hôte" hint="partie gauche du sous-domaine">
+                <Field label={t.form.host} hint={t.form.hostHint}>
                   <Input
                     placeholder="nas"
                     value={form.host}
@@ -197,16 +232,16 @@ export function CertificatesClient({
               )}
 
               <div className="rounded border border-ink-800 bg-ink-950 px-2.5 py-1.5 text-xs">
-                <span className="text-ink-600">sujet : </span>
+                <span className="text-ink-600">{t.form.subject} </span>
                 <span className="text-accent">{fqdn}</span>
               </div>
 
-              <Field label="Type de clé">
+              <Field label={t.form.keyType}>
                 <Select
                   value={form.key_type}
                   onChange={(e) => setForm({ ...form, key_type: e.target.value })}
                 >
-                  <option value="ec-256">ECDSA P-256 (recommandé)</option>
+                  <option value="ec-256">{t.form.keyEc256}</option>
                   <option value="ec-384">ECDSA P-384</option>
                   <option value="rsa-2048">RSA 2048</option>
                   <option value="rsa-4096">RSA 4096</option>
@@ -222,10 +257,10 @@ export function CertificatesClient({
                       onChange={(e) => setForm({ ...form, create_record: e.target.checked })}
                       className="accent-[var(--color-accent)]"
                     />
-                    Publier aussi l&apos;enregistrement A
+                    {t.form.publishA}
                   </label>
                   {form.create_record && (
-                    <Field label="IP locale" hint="publiée dans la zone publique Route53">
+                    <Field label={t.form.localIp} hint={t.form.localIpHint}>
                       <Input
                         placeholder="192.168.1.50"
                         value={form.target_ip}
@@ -243,15 +278,14 @@ export function CertificatesClient({
                   onChange={(e) => setForm({ ...form, auto_renew: e.target.checked })}
                   className="accent-[var(--color-accent)]"
                 />
-                Renouvellement automatique (J-30)
+                {t.form.autoRenew}
               </label>
 
               <Button type="submit" variant="primary" className="w-full">
-                Émettre
+                {t.form.submit}
               </Button>
               <p className="text-[11px] leading-relaxed text-ink-600">
-                L&apos;émission est asynchrone : DNS-01 prend 1 à 3 minutes le temps que le TXT se
-                propage sur tous les NS autoritatifs.
+                {t.form.asyncNote}
               </p>
             </form>
           )}
@@ -266,6 +300,7 @@ function EventLog({ certId, status }: { certId: string; status: string }) {
   const [lines, setLines] = useState<Array<{ at: string; step: string; message: string; level: string }>>([]);
   const boxRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const t = useT().certificates;
 
   useEffect(() => {
     let cancelled = false;
@@ -305,7 +340,7 @@ function EventLog({ certId, status }: { certId: string; status: string }) {
       className="max-h-56 overflow-y-auto border-t border-ink-800 bg-ink-950 px-3 py-2 text-[11px] leading-relaxed"
     >
       {lines.length === 0 ? (
-        <p className="text-ink-600">en attente d&apos;événements…</p>
+        <p className="text-ink-600">{t.log.waiting}</p>
       ) : (
         lines.map((l, i) => (
           <div key={i} className="flex gap-2">

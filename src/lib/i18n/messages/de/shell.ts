@@ -1,0 +1,47 @@
+import type { shell as en } from '../en/shell';
+
+export const shell: typeof en = {
+  nav: {
+    aria: "Hauptnavigation",
+    overview: "Übersicht",
+    certificates: "Zertifikate",
+    domains: "Domains",
+  },
+  homeLabel: "local-cert, Übersicht",
+  acmeChipTitle: "Für die Ausstellung verwendete Let's-Encrypt-Umgebung",
+  settings: {
+    label: "Einstellungen",
+    configuration: "Konfiguration",
+    reference: "Referenz",
+    providers: "Provider",
+    providersHint: "Konten bei den DNS-Anbietern",
+    keys: "Schlüssel & Rechte",
+    keysHint: "API-Schlüssel und EAB-Zugangsdaten",
+    api: "API",
+    apiHint: "Routen und Live-Anfragen",
+    docs: "Docs",
+    docsHint: "Einstiegs- und Integrationsanleitungen",
+    language: "Sprache",
+    signOut: "Abmelden",
+  },
+  theme: {
+    title: "Design wechseln: Auto, Hell, Dunkel",
+    aria: "Design: {current}. Design wechseln",
+    auto: "Auto",
+    light: "Hell",
+    dark: "Dunkel",
+  },
+  footer: {
+    aria: "Sitemap",
+    console: "Konsole",
+    configuration: "Konfiguration",
+    reference: "Referenz",
+    guides: "Anleitungen",
+    quickstart: "Schnellstart",
+    addDomain: "Domain hinzufügen",
+    dnsProviders: "DNS-Provider",
+    acmeServer: "ACME-Server",
+    rights: "Alle Rechte vorbehalten.",
+    version: "Version {version}",
+  },
+};

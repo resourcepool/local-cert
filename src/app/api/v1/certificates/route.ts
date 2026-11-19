@@ -10,7 +10,8 @@ import {
   listDomains,
   serializeCert,
 } from '@/lib/certificates';
-import { upsertRecord } from '@/lib/dns/route53';
+import { upsertRecord } from '@/lib/dns/zone';
+import { zoneFor } from '@/lib/dns/providers';
 import { logEvent } from '@/lib/acme/issue';
 
 export const dynamic = 'force-dynamic';
@@ -115,11 +116,7 @@ export const POST = handler(async (req: Request) => {
     const target = input.domains.find((d) => !d.startsWith('*.'));
     if (target) {
       await upsertRecord(
-        {
-          zoneId: domain.route53_zone_id,
-          region: domain.aws_region,
-          roleArn: domain.aws_role_arn,
-        },
+        await zoneFor(domain),
         target,
         'A',
         [input.dns.target_ip],

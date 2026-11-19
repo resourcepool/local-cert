@@ -22,7 +22,24 @@ export async function domainForFqdn(fqdn: string): Promise<DomainRow> {
   if (matches.length === 0) {
     throw new ApiError('validation_error', `No managed domain covers "${fqdn}"`);
   }
+  assertDomainReady(matches[0]);
   return matches[0];
+}
+
+/**
+ * A domain registered before its rights were in place takes no certificate and
+ * no record until its zone check has passed: every write would fail at the DNS
+ * host anyway, minutes later and less legibly.
+ */
+export function assertDomainReady(domain: Pick<DomainRow, 'name' | 'status'>): void {
+  if (domain.status === 'active') return;
+  throw new ApiError(
+    'conflict',
+    domain.status === 'pending'
+      ? `Domain "${domain.name}" is still being verified: its DNS rights are not in place yet. Retry in a few minutes.`
+      : `Domain "${domain.name}" failed its DNS rights check. Fix the rights at the DNS host, then restart the check from the console.`,
+    { domain: domain.name, status: domain.status },
+  );
 }
 
 export function parseMetadata(raw: string | null | undefined): Record<string, string> {

@@ -319,6 +319,12 @@ export async function newOrder(req: Request): Promise<Response> {
   if (covering.some((d) => d.id !== domain.id)) {
     throw new AcmeError('rejectedIdentifier', 'All identifiers of an order must belong to the same managed domain');
   }
+  if (domain.status !== 'active') {
+    throw new AcmeError(
+      'rejectedIdentifier',
+      `Managed domain ${domain.name} is not ready: its DNS rights check is ${domain.status === 'pending' ? 'still running' : 'failing'}`,
+    );
+  }
   if (!eabDomainIds(credential).includes(domain.id)) {
     throw new AcmeError('unauthorized', `This EAB credential is not allowed to issue under ${domain.name}`);
   }

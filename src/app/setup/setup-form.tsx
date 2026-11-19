@@ -2,6 +2,8 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { useT } from '@/lib/i18n/client';
+import { fmt, rich } from '@/lib/i18n/format';
 import { Button, Copyable, ErrorNote, Field, Input, Panel, api } from '@/components/ui';
 
 interface Policy {
@@ -19,6 +21,7 @@ interface Created {
 
 export function SetupForm() {
   const router = useRouter();
+  const t = useT();
   const [form, setForm] = useState({
     email: '',
     password: '',
@@ -83,22 +86,24 @@ export function SetupForm() {
 
   if (created) {
     return (
-      <Panel title="Compte créé">
+      <Panel title={t.auth.setup.createdTitle}>
         <p className="text-xs text-ink-300">
-          Compte administrateur <span className="text-accent">{created.email}</span> créé. Vous êtes
-          déjà connecté.
+          {rich(t.auth.setup.createdBody, {
+            email: <span className="text-accent">{created.email}</span>,
+          })}
         </p>
         {created.api_key_minted && (
           <>
-            <p className="mt-4 text-[11px] uppercase tracking-wider text-ink-400">
-              Clé d&apos;API — affichée une seule fois
+            <p className="mt-4 text-[11px] text-ink-400">
+              {t.auth.setup.keyShownOnce}
             </p>
             <div className="mt-1.5 rounded border border-accent/40 bg-ink-950 px-3 py-2">
               <Copyable value={created.api_key} />
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-ink-600">
-              Seul son hash est en base. Notez-la maintenant : elle n&apos;est plus récupérable.
-              Perdue ⇒ <code>npx tsx scripts/reset-admin.ts {created.email} &lt;mot-de-passe&gt;</code>.
+              {rich(fmt(t.auth.setup.keyNote, { email: created.email }), {
+                code: (c) => <code>{c}</code>,
+              })}
             </p>
           </>
         )}
@@ -110,16 +115,16 @@ export function SetupForm() {
             router.refresh();
           }}
         >
-          Ouvrir la console
+          {t.auth.setup.openConsole}
         </Button>
       </Panel>
     );
   }
 
   return (
-    <Panel title="Compte administrateur">
+    <Panel title={t.auth.setup.accountTitle}>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Email">
+        <Field label={t.auth.setup.email}>
           <Input
             type="email"
             required
@@ -131,7 +136,16 @@ export function SetupForm() {
           />
         </Field>
 
-        <Field label="Mot de passe" hint={policy?.description}>
+        <Field label={t.auth.setup.password} hint={
+            policy
+              ? policy.enforced
+                ? fmt(t.auth.policy.rules, {
+                    minLength: policy.minLength,
+                    requiredClasses: policy.requiredClasses,
+                  })
+                : t.auth.policy.none
+              : undefined
+          }>
           <Input
             type="password"
             required
@@ -140,7 +154,7 @@ export function SetupForm() {
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
         </Field>
-        <Field label="Confirmation">
+        <Field label={t.auth.setup.confirmation}>
           <Input
             type="password"
             required
@@ -152,12 +166,12 @@ export function SetupForm() {
         {policy?.enforced && form.password.length > 0 && !policyOk && (
           <p className="text-[11px] text-warn">
             {form.password.length < policy.minLength
-              ? `Encore ${policy.minLength - form.password.length} caractère(s).`
-              : `Encore ${policy.requiredClasses - classCount} catégorie(s) de caractères.`}
+              ? fmt(t.auth.setup.moreChars, { count: policy.minLength - form.password.length })
+              : fmt(t.auth.setup.moreClasses, { count: policy.requiredClasses - classCount })}
           </p>
         )}
 
-        {mismatch && <p className="text-[11px] text-danger">Les mots de passe diffèrent.</p>}
+        {mismatch && <p className="text-[11px] text-danger">{t.auth.setup.mismatch}</p>}
 
         <label className="flex items-center gap-2 border-t border-ink-800 pt-3 text-xs text-ink-300">
           <input
@@ -166,10 +180,10 @@ export function SetupForm() {
             onChange={(e) => setUseOwnKey(e.target.checked)}
             className="accent-[var(--color-accent)]"
           />
-          Fournir ma propre clé d&apos;API
+          {t.auth.setup.ownKey}
         </label>
         {useOwnKey ? (
-          <Field label="Clé d’API" hint="24 caractères minimum — stockée hachée, jamais réaffichée">
+          <Field label={t.auth.setup.apiKey} hint={t.auth.setup.apiKeyHint}>
             <Input
               type="password"
               autoComplete="off"
@@ -179,18 +193,16 @@ export function SetupForm() {
           </Field>
         ) : (
           <p className="text-[11px] text-ink-600">
-            Une clé sera générée et affichée une seule fois à l&apos;étape suivante.
+            {t.auth.setup.generated}
           </p>
         )}
 
         <ErrorNote>{error}</ErrorNote>
         <Button type="submit" variant="primary" disabled={busy || !canSubmit} className="w-full">
-          {busy ? 'Création…' : 'Créer le compte'}
+          {busy ? t.auth.setup.creating : t.auth.setup.create}
         </Button>
         <p className="text-[11px] leading-relaxed text-ink-600">
-          Cette page ne s&apos;affiche qu&apos;une fois. Pour automatiser, définissez
-          <code> ADMIN_EMAIL</code>, <code>ADMIN_PASSWORD</code> et éventuellement
-          <code> ADMIN_API_KEY</code> avant le premier démarrage.
+          {rich(t.auth.setup.once, { code: (c) => <code>{c}</code> })}
         </p>
       </form>
     </Panel>

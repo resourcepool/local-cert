@@ -4,12 +4,15 @@ import {
   createCertificateSchema,
   createDomainSchema,
   createEabSchema,
+  createProviderSchema,
   dnsRecordSchema,
   loginSchema,
   metadataSchema,
+  probeProviderSchema,
   setupSchema,
   updateGrantsSchema,
   updateMetadataSchema,
+  updateProviderSchema,
 } from '@/lib/validation';
 import { ALL_SCOPES } from '@/lib/scopes';
 
@@ -266,11 +269,160 @@ export const domainSchema = named(
     aws_region: z.string(),
     default_ttl: z.int(),
     created_at: z.string(),
+    provider_id: z.string().nullable(),
+    status: z.enum(['active', 'pending', 'error']).meta({
+      description:
+        'pending: registered before its DNS rights were in place, re-tested once a minute, five times. error: those checks all failed; restart them with POST /api/admin/domains/{id}/check. Only active domains issue certificates or take records.',
+    }),
+    check_attempts: z.int().meta({ description: 'Automatic checks done in the current cycle' }),
+    next_check_at: z.string().nullable(),
+    checked_at: z.string().nullable(),
+    check_error: z.string().nullable(),
+    provider_name: z.string().nullable().optional(),
+    provider_type: z.enum(['aws', 'ovh', 'gandi', 'godaddy', 'gcp']).nullable().optional(),
     certificate_count: z.int().optional(),
     preflight: z.array(preflightCheckSchema).optional(),
     warnings: z.array(z.string()).optional(),
   }),
 );
+
+export const domainPreflightSchema = named(
+  'DomainPreflight',
+  z.object({
+    name: z.string(),
+    route53_zone_id: z.string(),
+    zone_name: z.string().nullable(),
+    covers: z.boolean().meta({ description: 'The hosted zone serves the declared base name' }),
+    ok: z.boolean(),
+    checks: z.array(preflightCheckSchema),
+  }),
+);
+
+const policyDocumentSchema = named(
+  'IamPolicyDocument',
+  z.object({
+    Version: z.string(),
+    Statement: z.array(z.record(z.string(), z.unknown())),
+  }),
+);
+
+const probeStepSchema = z.object({ ok: z.boolean(), note: z.string() });
+
+export const providerProbeSchema = named(
+  'DnsProviderProbe',
+  z.object({
+    ok: z.boolean(),
+    identity: probeStepSchema.extend({
+      arn: z.string().nullable(),
+      account: z.string().nullable(),
+    }),
+    role: probeStepSchema.nullable(),
+    zones: probeStepSchema.extend({ count: z.int().nullable(), truncated: z.boolean() }),
+    policies: z
+      .object({
+        trust: policyDocumentSchema.nullable(),
+        assume: policyDocumentSchema.nullable(),
+        permissions: policyDocumentSchema,
+      })
+      .nullable()
+      .meta({ description: 'AWS only: the IAM documents to paste' }),
+  }),
+);
+
+export const providerSchema = named(
+  'DnsProvider',
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    type: z.enum(['aws', 'ovh', 'gandi', 'godaddy', 'gcp']),
+    settings: z.record(z.string(), z.string()).meta({
+      description: 'Non-AWS providers: their non-secret fields',
+    }),
+    credentials: z.enum(['static', 'ambient']),
+    access_key_id: z.string().nullable(),
+    role_arn: z.string().nullable(),
+    region: z.string(),
+    account_id: z.string().nullable(),
+    principal_arn: z.string().nullable(),
+    draft: z.boolean().meta({ description: 'Creation unfinished; not usable by domains yet' }),
+    managed: z.enum(['env']).nullable().meta({
+      description: 'env: declared by PROVIDER_AWS_<env_key>_* variables; read-only in the API',
+    }),
+    env_key: z.string().nullable(),
+    domain_count: z.int(),
+    created_at: z.string(),
+    updated_at: z.string(),
+    probe: providerProbeSchema.optional(),
+  }),
+);
+
+export const providerListSchema = named(
+  'DnsProviderList',
+  z.object({ items: z.array(providerSchema) }),
+);
+
+export const providerZoneListSchema = named(
+  'DnsProviderZoneList',
+  z.object({
+    items: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        private: z.boolean(),
+        record_count: z.int().nullable(),
+        comment: z.string().nullable(),
+        domains: z.array(z.string()),
+        delegated: z.boolean().nullable().meta({
+          description:
+            'OVHcloud only: false when the public DNS delegates the name to nameservers other than the ones of this zone, so records written here are never seen. null: not checked or inconclusive.',
+        }),
+        public_nameservers: z.array(z.string()),
+      }),
+    ),
+  }),
+);
+
+export const providerPolicySchema = named(
+  'DnsProviderPolicy',
+  z.object({
+    provider: z.object({ id: z.string(), name: z.string() }),
+    attach_to: z
+      .object({ kind: z.enum(['role', 'user']), arn: z.string().nullable() })
+      .nullable(),
+    zone_ids: z.array(z.string()),
+    policy: policyDocumentSchema.nullable().meta({
+      description: 'null for hosts other than AWS, where rights are not scoped per zone',
+    }),
+  }),
+);
+
+export const providerDeleteSchema = named(
+  'DnsProviderDeleteResult',
+  z.object({
+    id: z.string(),
+    deleted: z.boolean(),
+    cleanup: z
+      .object({
+        ok: z.boolean(),
+        changed: z.boolean().meta({ description: 'Something was deleted on AWS' }),
+        steps: z.array(
+          z.object({ id: z.string(), label: z.string(), ok: z.boolean(), note: z.string() }),
+        ),
+        leftovers: z.array(z.string()).meta({
+          description: 'AWS CLI commands for what the provider could not remove itself',
+        }),
+      })
+      .nullable()
+      .meta({ description: 'null unless cleanup=true was requested' }),
+  }),
+);
+
+export type ProviderResource = z.infer<typeof providerSchema>;
+export type ProviderDeleteResult = z.infer<typeof providerDeleteSchema>;
+export type ProviderProbe = z.infer<typeof providerProbeSchema>;
+export type ProviderZoneList = z.infer<typeof providerZoneListSchema>;
+export type ProviderPolicy = z.infer<typeof providerPolicySchema>;
+export type DomainPreflight = z.infer<typeof domainPreflightSchema>;
 
 export const apiKeySchema = named(
   'ApiKey',
@@ -431,5 +583,8 @@ export const requests = {
   login: named('LoginRequest', loginSchema),
   setup: named('SetupRequest', setupSchema),
   createEab: named('CreateAcmeEabRequest', createEabSchema),
+  createProvider: named('CreateDnsProviderRequest', createProviderSchema),
+  updateProvider: named('UpdateDnsProviderRequest', updateProviderSchema),
+  probeProvider: named('ProbeDnsProviderRequest', probeProviderSchema),
   token: tokenRequestSchema,
 };
