@@ -982,3 +982,9 @@ Pour scaler, passez à Postgres, lancez les instances web avec
 - Un seul compte administrateur, créé au setup. Pas de gestion multi-utilisateurs
   ni de changement de mot de passe depuis la console — la rotation passe par
   `scripts/reset-admin.ts`.
+
+---
+
+## Licence
+
+local-cert est distribué sous licence [Apache 2.0](LICENSE).
